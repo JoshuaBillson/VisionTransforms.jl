@@ -3,6 +3,13 @@ uuid = "37e541b6-9579-4ef0-95be-8b1e07953bf5"
 authors = ["Joshua Billson"]
 version = "1.0.0-DEV"
 
+[deps]
+Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
+Match = "7eb4fadd-790c-5f42-8a69-bfa0b872bfbf"
+Pipe = "b98c9c47-44ae-5843-9183-064241ee97a0"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+
 [compat]
 julia = "1.6.7"
 
