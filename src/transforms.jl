@@ -4,9 +4,41 @@ struct Image end
 struct Mask end
 struct NoOp end
 
+struct Image2D{T} <: AbstractArray{T,4}
+    data::Array{T,4}
+    Image2D(x::AbstractArray{<:Any,4}) = Image2D(Array(x))
+    Image2D(x::Array{T,4}) where T = new{T}(x)
+end
+
+Base.size(x::Image2D) = size(x.data)
+
+Base.getindex(x::Image2D, i::Int) = x.data[i]
+
+Base.setindex!(x::Image2D, v, i::Int) = Base.setindex!(x.data, v, i)
+
+Base.IndexStyle(::Type{<:Image2D}) = IndexLinear()
+
+Base.similar(x::Image2D, ::Type{T}, dims::Dims) where {T} = Image2D(Base.similar(x.data, T, dims))
+
+struct Mask2D{T} <: AbstractArray{T,4}
+    data::Array{T,4}
+    Mask2D(x::AbstractArray{<:Any,4}) = Mask2D(Array(x))
+    Mask2D(x::Array{T,4}) where T = new{T}(x)
+end
+
+Base.size(x::Mask2D) = size(x.data)
+
+Base.getindex(x::Mask2D, i::Int) = x.data[i]
+
+Base.setindex!(x::Mask2D, v, i::Int) = Base.setindex!(x.data, v, i)
+
+Base.IndexStyle(::Type{<:Mask2D}) = IndexLinear()
+
+Base.similar(x::Mask2D, ::Type{T}, dims::Dims) where {T} = Mask2D(Base.similar(x.data, T, dims))
+
 abstract type AbstractTransform end
 
-apply(::AbstractTransform, ::Any, x, ::Int) = x
+apply(::AbstractTransform, x, ::Int) = x
 
 """
     transform(t::AbstractTransform, dtype::DType, x)
@@ -14,15 +46,14 @@ apply(::AbstractTransform, ::Any, x, ::Int) = x
 
 Apply the transformation `t` to the input `x` with data type `dtype`.
 """
-apply_transform(t::AbstractTransform, dtype, data) = apply(t, dtype, data, rand(1:1000))
-function apply_transform(t::AbstractTransform, dtype::Tuple, data::Tuple)
-    @assert length(dtype) == length(data)
+apply_transform(t::AbstractTransform, x) = apply(t, x, rand(1:1000))
+function apply_transform(t::AbstractTransform, x::Tuple)
     seed = rand(1:1000)
-    return ntuple(i -> apply(t, dtype[i], data[i], seed), length(data))
+    map(x -> apply(t, x, seed), x)
 end
 
 """
-    Resample(scale)
+    Resize(sz::Tuple)
 
 Resample `x` according to the specified `scale`. `Mask` types will always be
 resampled with `:near` interpolation, whereas `Images` will be resampled with 
@@ -36,10 +67,11 @@ struct Resize{S<:Tuple} <: AbstractTransform
     sz::S
 end
 
-apply(t::Resize, ::Mask, x, ::Int) = imresize(x, t.sz, method=:nearest)
-apply(t::Resize, ::Image, x, ::Int) = imresize(x, t.sz, method=:bilinear)
+apply(t::Resize{Tuple{Int,Int}}, x::Mask2D, ::Int) = imresize(x.data, t.sz, method=:nearest) |> Mask2D
+apply(t::Resize{Tuple{Int,Int}}, x::Image2D, ::Int) = imresize(x.data, t.sz, method=:bilinear) |> Image2D
 
 description(x::Resize) = "Resize to $(x.sz)."
+
 """
     RandomCrop(size::Int)
     RandomCrop(size::Tuple{Int,Int})
@@ -52,7 +84,9 @@ end
 
 RandomCrop(size::Int) = RandomCrop((size, size))
 
-function apply(t::RandomCrop, ::Union{Image,Mask}, x, seed::Int)
+apply(t::RandomCrop, x::Mask2D, seed::Int) = _apply(t, x, seed)
+apply(t::RandomCrop, x::Image2D, seed::Int) = _apply(t, x, seed)
+function _apply(t::RandomCrop, x::AbstractArray, seed::Int)
     xpad = size(x, 1) - t.sz[1]
     ypad = size(x, 2) - t.sz[2]
     outcome = rand(Random.MersenneTwister(seed), Random.uniform(Float64), 2)
@@ -79,7 +113,9 @@ struct FlipX <: AbstractTransform
     end
 end
 
-apply(t::FlipX, ::Union{Mask,Image}, x, seed::Int) = _apply_random(seed, t.p) ? flipX(x) : x
+apply(t::FlipX, x::Mask2D, seed::Int) = _apply(t, x, seed)
+apply(t::FlipX, x::Image2D, seed::Int) = _apply(t, x, seed)
+_apply(t::FlipX, x::AbstractArray, seed::Int) = _apply_random(seed, t.p) ? flipX(x) : x
 
 description(x::FlipX) = "Random horizontal flip with probability $(round(x.p, digits=2))."
 
@@ -100,7 +136,10 @@ struct FlipY <: AbstractTransform
     end
 end
 
-apply(t::FlipY, ::Union{Image,Mask}, x, seed::Int) = _apply_random(seed, t.p) ? flipY(x) : x
+apply(t::FlipY, x::Mask2D, seed::Int) = _apply(t, x, seed)
+apply(t::FlipY, x::Image2D, seed::Int) = _apply(t, x, seed)
+
+_apply(t::FlipY, x::AbstractArray, seed::Int) = _apply_random(seed, t.p) ? flipY(x) : x
 
 description(x::FlipY) = "Random vertical flip with probability $(round(x.p, digits=2))."
 
@@ -121,7 +160,10 @@ struct Rot90 <: AbstractTransform
     end
 end
 
-apply(t::Rot90, ::Union{Image,Mask}, x, seed::Int) = _apply_random(seed, t.p) ? rot90(x) : x
+apply(t::Rot90, x::Mask2D, seed::Int) = _apply(t, x, seed)
+apply(t::Rot90, x::Image2D, seed::Int) = _apply(t, x, seed)
+
+_apply(t::Rot90, x::AbstractArray, seed::Int) = _apply_random(seed, t.p) ? rot90(x) : x
 
 description(x::Rot90) = "Random 90 degree rotation with probability $(round(x.p, digits=2))."
 
@@ -153,8 +195,12 @@ struct ComposedTransform{T} <: AbstractTransform
     end
 end
 
-function apply(t::ComposedTransform, dtype, x, seed::Int)
-    return reduce((acc, trans) -> apply(trans, dtype, acc, seed), t.transforms, init=x)
+function apply(t::ComposedTransform, x, seed::Int)
+    seeds = rand(MersenneTwister(seed), 1:10000, length(t.transforms))
+    for (s, t) in zip(seeds, t.transforms)
+        x = apply(t, x, s)
+    end
+    return x
 end
 
 function Base.show(io::IO, x::ComposedTransform)

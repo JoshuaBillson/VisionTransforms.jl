@@ -28,7 +28,7 @@ Resize `img` to `sz` with the specified resampling `method`.
 """
 function imresize(img::AbstractArray{<:Real,N}, sz::Tuple; method=:bilinear) where {N}
     if size(img,N) == 1
-        resized = imresize(selectdim(img, N, 1), sz)
+        resized = _imresize(selectdim(img, N, 1), sz, method)
         return reshape(resized, size(resized)..., 1)
     end
     return _imresize(img, sz, method)
