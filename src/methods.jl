@@ -98,3 +98,25 @@ Rotate the image `x` by 90 degress.
 function rot90(x::AbstractArray{<:Any,4})
     return @pipe permutedims(x, (2, 1, 3, 4)) |> reverse(_, dims=2)
 end
+
+"""
+    normalize(x::AbstractArray, μ::AbstractVector, σ::AbstractVector; dim=1)
+
+Normalize the input array with respect to the specified dimension so that the mean is 0
+and the standard deviation is 1.
+
+# Parameters
+- `μ`: A `Vector` of means for each index in `dim`.
+- `σ`: A `Vector` of standard deviations for each index in `dim`.
+- `dim`: The dimension along which to normalize the input array.
+"""
+normalize(x::AbstractArray{<:Integer}, μ::AbstractVector, σ::AbstractVector; kw...) = normalize(Float32.(x), μ, σ; kw...)
+function normalize(x::AbstractArray{T,N}, μ::AbstractVector, σ::AbstractVector; dim=1) where {T<:AbstractFloat,N}
+    @assert 1 <= dim <= N
+    @assert length(μ) == length(σ) == size(x,dim)
+    return (x .- _vec2array(T.(μ), N, dim)) ./ _vec2array(T.(σ), N, dim)
+end
+
+function _vec2array(x::AbstractVector, ndims::Int, dim::Int)
+    return reshape(x, ntuple(i -> i == dim ? Colon() : 1, ndims))
+end

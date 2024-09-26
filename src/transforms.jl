@@ -73,6 +73,28 @@ apply(t::Resize{Tuple{Int,Int}}, x::Image2D, ::Int) = imresize(x.data, t.sz, met
 description(x::Resize) = "Resize to $(x.sz)."
 
 """
+    Normalize(;mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+Normalize the channels to have a mean of 0 and a standard deviation of 1.
+
+# Parameters
+- `mean`: The channel-wise mean of the input data (uses the ImageNet mean by default).
+- `std`: The channel-wise standard deviation of the input data (uses the ImageNet std by default).
+"""
+struct Normalize <: AbstractTransform
+    μ::Vector{Float64}
+    σ::Vector{Float64}
+end
+
+Normalize(;mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) = Normalize(mean, std)
+Normalize(μ::Vector{<:Real}, σ::Vector{<:Real}) = Normalize(Float64.(μ), Float64.(σ))
+
+
+apply(t::Normalize, x::Image2D, ::Int) = normalize(x.data, t.μ, t.σ; dim=3) |> Image2D
+
+description(x::Normalize) = "Normalize channels."
+
+"""
     RandomCrop(size::Int)
     RandomCrop(size::Tuple{Int,Int})
 
