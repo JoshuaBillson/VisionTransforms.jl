@@ -148,12 +148,37 @@ end
 Normalize(;mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) = Normalize(mean, std)
 Normalize(μ::Vector{<:Real}, σ::Vector{<:Real}) = Normalize(Float64.(μ), Float64.(σ))
 
-
 apply(t::Normalize, x::Image2D, ::Int) = normalize(x.data, t.μ, t.σ; dim=3)
 apply(t::Normalize, x::Image3D, ::Int) = normalize(x.data, t.μ, t.σ; dim=4)
 apply(t::Normalize, x::Series2D, ::Int) = normalize(x.data, t.μ, t.σ; dim=3)
 
 description(x::Normalize) = "Normalize channels."
+
+"""
+    PerImageNormalize()
+
+Normalize the channels to have a mean of 0 and a standard deviation of 1 based on statistics
+calculated for each image in a batch.
+"""
+struct PerImageNormalize <: AbstractTransform end
+
+apply(::PerImageNormalize, x::Image2D, ::Int) = _per_image_normalize(x, 3)
+apply(::PerImageNormalize, x::Image3D, ::Int) = _per_image_normalize(x, 4)
+apply(::PerImageNormalize, x::Series2D, ::Int) = _per_image_normalize(x, 3)
+
+function _per_image_normalize(x::AbstractArray{<:Real,N}, channel_dim::Int) where N
+    dst = copy(x)
+    for i in axes(x)[N]
+        img = selectdim(x, N, i:i) |> collect
+        dims = filter(!=(channel_dim), ntuple(identity, N))
+        μ = mean(img, dims=dims) |> vec |> collect
+        σ = std(img, dims=dims) |> vec |> collect
+        selectdim(dst, N, i:i) .= normalize(img, μ, σ, dim=channel_dim)
+    end
+    return dst
+end
+
+description(x::PerImageNormalize) = "Normalize with per-image statistics."
 
 """
     RandomCrop(size::Int)

@@ -16,6 +16,6 @@ export image2tensor, tensor2image, imresize, crop, flipX, flipY, rot90
 include("transforms.jl")
 export DType, AbstractImage, AbstractMask, Image2D, Image3D, Mask2D, Mask3D, Series2D, NoOp, AbstractTransform
 export apply_transform, apply
-export Resize, Scale, Normalize, RandomCrop, FlipX, FlipY, Rot90, ComposedTransform
+export Resize, Scale, Normalize, PerImageNormalize, RandomCrop, FlipX, FlipY, Rot90, ComposedTransform
 
 end
