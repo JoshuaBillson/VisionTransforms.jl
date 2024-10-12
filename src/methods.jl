@@ -6,15 +6,21 @@ function image2tensor(image::AbstractArray{<:Images.Colorant,2})
     _putobs(_)
 end
 
-function tensor2image(tensor::AbstractArray{<:Real,4})
+_putobs(x::AbstractArray) = reshape(x, size(x)..., 1)
+
+function tensor2image(tensor::AbstractArray{<:Real,4}; bands=[1,2,3])
     @assert size(tensor, 3) == 3
     if size(tensor, 4) > 1
         return map(i -> tensor2image(selectdim(tensor, 4, i:i)), axes(tensor)[end])
+    else
+        return @pipe tensor |>
+        selectdim(_, 4, 1) |> 
+        selectdim(_, 3, bands) |> 
+        Images.n0f8.(_) |> 
+        permutedims(_, (3,2,1)) |> 
+        Images.colorview(Images.RGB, _)
     end
-    return @pipe selectdim(tensor, 4, 1) |> Images.n0f8.(_) |> permutedims(_, (3,2,1)) |> Images.colorview(Images.RGB, _)
 end
-
-_putobs(x::AbstractArray) = reshape(x, size(x)..., 1)
 
 """
     resize(img::AbstractArray, sz::Tuple{Int,Int}; method=:bilinear)
@@ -27,18 +33,36 @@ Resize `img` to `sz` with the specified resampling `method`.
 - `method`: Either `:nearest` or `:bilinear`.
 """
 function imresize(img::AbstractArray{<:Real,N}, sz::Tuple; method=:bilinear) where {N}
-    if size(img,N) == 1
-        resized = _imresize(selectdim(img, N, 1), sz, method)
-        return reshape(resized, size(resized)..., 1)
-    end
-    return _imresize(img, sz, method)
+    dst = similar(img, _newsize(sz,img))
+    dst .= _imresize(collect(selectdim(img, N, 1)), sz, method)
+    return dst
 end
+
+_newsize(sz::Tuple{Int,Int}, x::AbstractArray{<:Any,N}) where N = (sz[1], sz[2], size(x)[3:N]...)
+_newsize(sz::Tuple{Int,Int,Int}, x::AbstractArray{<:Any,N}) where N = (sz[1], sz[2], sz[3], size(x)[4:N]...)
 
 function _imresize(img::AbstractArray, sz::Tuple, method::Symbol)
     @match method begin
         :nearest => Images.imresize(img, sz, method=Constant())
         :bilinear => Images.imresize(img, sz, method=Linear())
     end
+end
+
+"""
+    linear_stretch(x::AbstractArray{<:Real,3}, lower::Vector{<:Real}, upper::Vector{<:Real})
+
+Perform a linear histogram stretch on `x` such that `lower` is mapped to 0 and `upper` is mapped to 1.
+Values outside the interval `[lower, upper]` will be clamped.
+"""
+function linear_stretch(x::AbstractArray{<:Real}, lower::Real, upper::Real, dim::Int)
+    @argcheck 0 <= lower <= upper <= 1
+    quantiles = _quantiles(x, lower, upper, dim)
+    return linear_stretch(x, map(first, quantiles), map(last, quantiles), dim)
+end
+function linear_stretch(x::AbstractArray{<:Real}, lower::Vector{<:Real}, upper::Vector{<:Real}, dim::Int)
+    lower = vec2array(lower, x, dim)
+    upper = vec2array(upper, x, dim)
+    return clamp!((x .- lower) ./ (upper .- lower), 0, 1)
 end
 
 """
@@ -95,9 +119,9 @@ flipY(x::AbstractArray{<:Any,6}) = x[end:-1:1,:,:,:,:,:]
 
 Rotate the image `x` by 90 degress. 
 """
-function rot90(x::AbstractArray{<:Any,4})
-    return @pipe permutedims(x, (2, 1, 3, 4)) |> reverse(_, dims=2)
-end
+rot90(x::AbstractArray{<:Any,4}) = @pipe permutedims(x, (2,1,3,4)) |> reverse(_, dims=2)
+rot90(x::AbstractArray{<:Any,5}) = @pipe permutedims(x, (2,1,3,4,5)) |> reverse(_, dims=2)
+rot90(x::AbstractArray{<:Any,6}) = @pipe permutedims(x, (2,1,3,4,5,6)) |> reverse(_, dims=2)
 
 """
     normalize(x::AbstractArray, μ::AbstractVector, σ::AbstractVector; dim=1)
@@ -119,4 +143,18 @@ end
 
 function _vec2array(x::AbstractVector, ndims::Int, dim::Int)
     return reshape(x, ntuple(i -> i == dim ? Colon() : 1, ndims))
+end
+
+add_noise(dist::Distributions.Distribution, x::AbstractArray{<:Real,4}; kw...) = add_noise(Random.default_rng(), dist, x; kw...)
+function add_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::AbstractArray{T,4}; correlated=true) where {T <: Real}
+    noise_dim = correlated ? (size(x)[1:2]..., 1, size(x,4)) : size(x)
+    noise = rand(rng, dist, noise_dim) .|> T
+    return x .+ noise
+end
+
+multiply_noise(dist::Distributions.Distribution, x::AbstractArray{<:Real,4}; kw...) = multiply_noise(Random.default_rng(), dist, x; kw...)
+function multiply_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::AbstractArray{T,4}; correlated=true) where {T <: Real}
+    noise_dim = correlated ? (size(x)[1:2]..., 1, size(x,4)) : size(x)
+    noise = rand(rng, dist, noise_dim) .|> T
+    return x .* noise
 end

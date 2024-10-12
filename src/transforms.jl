@@ -1,40 +1,66 @@
 import Base.|>
 
-struct Image end
-struct Mask end
-struct NoOp end
+abstract type DType{T,N} <: AbstractArray{T,N} end
 
-struct Image2D{T} <: AbstractArray{T,4}
+abstract type AbstractImage{T,N} <: DType{T,N} end
+
+abstract type AbstractMask{T,N} <: DType{T,N} end
+
+struct Image2D{T} <: AbstractImage{T,4}
     data::Array{T,4}
     Image2D(x::AbstractArray{<:Any,4}) = Image2D(Array(x))
     Image2D(x::Array{T,4}) where T = new{T}(x)
 end
 
-Base.size(x::Image2D) = size(x.data)
+struct Image3D{T} <: AbstractImage{T,5}
+    data::Array{T,5}
+    Image3D(x::AbstractArray{<:Any,5}) = Image3D(Array(x))
+    Image3D(x::Array{T,5}) where T = new{T}(x)
+end
 
-Base.getindex(x::Image2D, i::Int) = x.data[i]
+struct Series2D{T} <: AbstractImage{T,5}
+    data::Array{T,5}
+    Series2D(x::AbstractArray{<:Any,5}) = Series2D(Array(x))
+    Series2D(x::Array{T,5}) where T = new{T}(x)
+end
 
-Base.setindex!(x::Image2D, v, i::Int) = Base.setindex!(x.data, v, i)
-
-Base.IndexStyle(::Type{<:Image2D}) = IndexLinear()
-
-Base.similar(x::Image2D, ::Type{T}, dims::Dims) where {T} = Image2D(Base.similar(x.data, T, dims))
-
-struct Mask2D{T} <: AbstractArray{T,4}
+struct Mask2D{T} <: AbstractMask{T,4}
     data::Array{T,4}
     Mask2D(x::AbstractArray{<:Any,4}) = Mask2D(Array(x))
     Mask2D(x::Array{T,4}) where T = new{T}(x)
 end
 
-Base.size(x::Mask2D) = size(x.data)
+struct Mask3D{T} <: AbstractMask{T,5}
+    data::Array{T,5}
+    Mask3D(x::AbstractArray{<:Any,5}) = Mask3D(Array(x))
+    Mask3D(x::Array{T,5}) where T = new{T}(x)
+end
 
-Base.getindex(x::Mask2D, i::Int) = x.data[i]
+struct NoOp{T,N} <: DType{T,N}
+    data::Array{T,N}
+    NoOp(x::AbstractArray) = Mask3D(Array(x))
+    NoOp(x::Array{T,N}) where {T,N} = new{T,N}(x)
+end
 
-Base.setindex!(x::Mask2D, v, i::Int) = Base.setindex!(x.data, v, i)
+for dtype = (:Image2D, :Image3D, :Series2D, :Mask2D, :Mask3D, :NoOp)
+    @eval Base.size(x::$dtype) = size(x.data)
 
-Base.IndexStyle(::Type{<:Mask2D}) = IndexLinear()
+    @eval Base.getindex(x::$dtype, i::Int) = x.data[i]
 
-Base.similar(x::Mask2D, ::Type{T}, dims::Dims) where {T} = Mask2D(Base.similar(x.data, T, dims))
+    @eval Base.setindex!(x::$dtype, v, i::Int) = Base.setindex!(x.data, v, i)
+
+    @eval Base.IndexStyle(::Type{<:$dtype}) = IndexLinear()
+
+    @eval Base.similar(x::$dtype, ::Type{T}, dims::Dims) where {T} = $dtype(Base.similar(x.data, T, dims))
+
+    @eval Base.BroadcastStyle(::Type{<:$dtype}) = Broadcast.ArrayStyle{$dtype}()
+
+    @eval begin 
+        function Base.similar(bc::Broadcast.Broadcasted{Broadcast.ArrayStyle{$dtype}}, ::Type{T}) where T
+            return $dtype(similar(Array{T}, axes(bc)))
+        end
+    end
+end
 
 abstract type AbstractTransform end
 
@@ -46,7 +72,11 @@ apply(::AbstractTransform, x, ::Int) = x
 
 Apply the transformation `t` to the input `x` with data type `dtype`.
 """
+apply_transform(t::AbstractTransform, ::Type{T}, x) where T = apply(t, T(x), rand(1:1000))
 apply_transform(t::AbstractTransform, x) = apply(t, x, rand(1:1000))
+function apply_transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
+    return apply_transform(t, ntuple(i -> dtypes[i](x[i]), length(dtypes)))
+end
 function apply_transform(t::AbstractTransform, x::Tuple)
     seed = rand(1:1000)
     map(x -> apply(t, x, seed), x)
@@ -60,17 +90,46 @@ resampled with `:near` interpolation, whereas `Images` will be resampled with
 either `:bilinear` (`scale` > `1`) or `:average` (`scale` < `1`).
 
 # Parameters
-- `x`: The raster/stack to be resampled.
-- `scale`: The size of the output with respect to the input.
+- `x`: The image/mask to be resampled.
+- `sz`: The size of the output image.
 """
 struct Resize{S<:Tuple} <: AbstractTransform
     sz::S
 end
 
-apply(t::Resize{Tuple{Int,Int}}, x::Mask2D, ::Int) = imresize(x.data, t.sz, method=:nearest) |> Mask2D
-apply(t::Resize{Tuple{Int,Int}}, x::Image2D, ::Int) = imresize(x.data, t.sz, method=:bilinear) |> Image2D
+apply(t::Resize{Tuple{Int,Int}}, x::Mask2D, ::Int) = imresize(x, t.sz, method=:nearest)
+apply(t::Resize{Tuple{Int,Int}}, x::Image2D, ::Int) = imresize(x, t.sz, method=:bilinear)
+apply(t::Resize{Tuple{Int,Int}}, x::Series2D, ::Int) = imresize(x, t.sz, method=:bilinear)
+apply(t::Resize{Tuple{Int,Int,Int}}, x::Image3D, ::Int) = imresize(x, t.sz, method=:bilinear)
+apply(t::Resize{Tuple{Int,Int,Int}}, x::Mask3D, ::Int) = imresize(x, t.sz, method=:nearest)
 
 description(x::Resize) = "Resize to $(x.sz)."
+
+"""
+    Scale(;lower=0.02, upper=0.98)
+
+Apply a linear stretch to scale all values to the range [0, 1]. The arguments `lower` and
+`upper` specify the percentiles at which to define the lower and upper bounds from the source
+array. Values that either fall below `lower` or above `upper` will be clamped.
+
+# Parameters
+- `lower`: The quantile to use as the lower-bound in the source array.
+- `upper`: The quantile to use as the upper-bound in the source array.
+"""
+struct Scale{B<:Tuple} <: AbstractTransform
+    bounds::B
+end
+
+function Scale(;lower=0.02, upper=0.98)
+    @argcheck 0 <= lower <= upper <= 1
+    return Scale((lower, upper))
+end
+
+description(x::Scale) = "Scale values to [0, 1]."
+
+apply(t::Scale, x::Image2D, ::Int) = linear_stretch(x, t.bounds[1], t.bounds[2], 3)
+apply(t::Scale, x::Image3D, ::Int) = linear_stretch(x, t.bounds[1], t.bounds[2], 4)
+apply(t::Scale, x::Series2D, ::Int) = linear_stretch(x, t.bounds[1], t.bounds[2], 4)
 
 """
     Normalize(;mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -90,7 +149,9 @@ Normalize(;mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) = Normalize(me
 Normalize(μ::Vector{<:Real}, σ::Vector{<:Real}) = Normalize(Float64.(μ), Float64.(σ))
 
 
-apply(t::Normalize, x::Image2D, ::Int) = normalize(x.data, t.μ, t.σ; dim=3) |> Image2D
+apply(t::Normalize, x::Image2D, ::Int) = normalize(x.data, t.μ, t.σ; dim=3)
+apply(t::Normalize, x::Image3D, ::Int) = normalize(x.data, t.μ, t.σ; dim=4)
+apply(t::Normalize, x::Series2D, ::Int) = normalize(x.data, t.μ, t.σ; dim=3)
 
 description(x::Normalize) = "Normalize channels."
 
@@ -106,8 +167,8 @@ end
 
 RandomCrop(size::Int) = RandomCrop((size, size))
 
-apply(t::RandomCrop, x::Mask2D, seed::Int) = _apply(t, x, seed)
-apply(t::RandomCrop, x::Image2D, seed::Int) = _apply(t, x, seed)
+apply(::RandomCrop, x::NoOp, ::Int) = x
+apply(t::RandomCrop, x::DType, seed::Int) = _apply(t, x, seed)
 function _apply(t::RandomCrop, x::AbstractArray, seed::Int)
     xpad = size(x, 1) - t.sz[1]
     ypad = size(x, 2) - t.sz[2]
@@ -135,9 +196,8 @@ struct FlipX <: AbstractTransform
     end
 end
 
-apply(t::FlipX, x::Mask2D, seed::Int) = _apply(t, x, seed)
-apply(t::FlipX, x::Image2D, seed::Int) = _apply(t, x, seed)
-_apply(t::FlipX, x::AbstractArray, seed::Int) = _apply_random(seed, t.p) ? flipX(x) : x
+apply(::FlipX, x::NoOp, ::Int) = x
+apply(t::FlipX, x::DType, seed::Int) = _apply_random(seed, t.p) ? flipX(x) : x
 
 description(x::FlipX) = "Random horizontal flip with probability $(round(x.p, digits=2))."
 
@@ -158,10 +218,8 @@ struct FlipY <: AbstractTransform
     end
 end
 
-apply(t::FlipY, x::Mask2D, seed::Int) = _apply(t, x, seed)
-apply(t::FlipY, x::Image2D, seed::Int) = _apply(t, x, seed)
-
-_apply(t::FlipY, x::AbstractArray, seed::Int) = _apply_random(seed, t.p) ? flipY(x) : x
+apply(::FlipY, x::NoOp, ::Int) = x
+apply(t::FlipY, x::DType, seed::Int) = _apply_random(seed, t.p) ? flipY(x) : x
 
 description(x::FlipY) = "Random vertical flip with probability $(round(x.p, digits=2))."
 
@@ -182,10 +240,8 @@ struct Rot90 <: AbstractTransform
     end
 end
 
-apply(t::Rot90, x::Mask2D, seed::Int) = _apply(t, x, seed)
-apply(t::Rot90, x::Image2D, seed::Int) = _apply(t, x, seed)
-
-_apply(t::Rot90, x::AbstractArray, seed::Int) = _apply_random(seed, t.p) ? rot90(x) : x
+apply(::Rot90, x::NoOp, ::Int) = x
+apply(t::Rot90, x::DType, seed::Int) = _apply_random(seed, t.p) ? rot90(x) : x
 
 description(x::Rot90) = "Random 90 degree rotation with probability $(round(x.p, digits=2))."
 
