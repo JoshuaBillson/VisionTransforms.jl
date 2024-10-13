@@ -9,7 +9,7 @@ end
 _putobs(x::AbstractArray) = reshape(x, size(x)..., 1)
 
 function tensor2image(tensor::AbstractArray{<:Real,4}; bands=[1,2,3])
-    @assert size(tensor, 3) == 3
+    @argcheck size(bands, 3) == 3
     if size(tensor, 4) > 1
         return map(i -> tensor2image(selectdim(tensor, 4, i:i)), axes(tensor)[end])
     else
