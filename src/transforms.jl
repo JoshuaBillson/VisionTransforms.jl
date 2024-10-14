@@ -318,7 +318,7 @@ struct ComposedTransform{T} <: AbstractTransform
     end
 end
 
-function apply(t::ComposedTransform, x, seed::Int)
+function apply(t::ComposedTransform, x::DType, seed::Int)
     seeds = rand(MersenneTwister(seed), 1:10000, length(t.transforms))
     for (s, t) in zip(seeds, t.transforms)
         x = apply(t, x, s)
