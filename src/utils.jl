@@ -6,6 +6,11 @@ function vec2array(x::AbstractVector{T}, to::AbstractArray{T,N}, dim::Int) where
     return reshape(x, newshape)
 end
 
+function unsqueeze(x::AbstractArray{<:Any,N}, dim::Int) where N
+    newsize = (size(x)[1:dim-1]..., 1, size(x)[dim:end]...)
+    return reshape(x, newsize)
+end
+
 function _quantiles(x::AbstractArray{<:Real}, lower, upper, dim::Int)
     map(1:size(x, dim)) do i
         data = selectdim(x, dim, i) |> vec

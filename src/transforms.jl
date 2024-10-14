@@ -9,6 +9,7 @@ abstract type AbstractMask{T,N} <: DType{T,N} end
 struct Image2D{T} <: AbstractImage{T,4}
     data::Array{T,4}
     Image2D(x::AbstractArray{<:Any,4}) = Image2D(Array(x))
+    Image2D(x::AbstractArray{<:Images.Colorant,2}) = Image2D(image2tensor(x))
     Image2D(x::Array{T,4}) where T = new{T}(x)
 end
 
@@ -22,6 +23,9 @@ struct Series2D{T} <: AbstractImage{T,5}
     data::Array{T,5}
     Series2D(x::AbstractArray{<:Any,5}) = Series2D(Array(x))
     Series2D(x::Array{T,5}) where T = new{T}(x)
+    function Series2D(x::AbstractVector{<:AbstractArray{<:Images.Colorant,2}})
+        @pipe map(image2tensor, x) |> map(x -> unsqueeze(x, 4), _) |> cat(_..., dims=4)
+    end
 end
 
 struct Mask2D{T} <: AbstractMask{T,4}
@@ -64,7 +68,11 @@ end
 
 abstract type AbstractTransform end
 
-apply(::AbstractTransform, x, ::Int) = x
+apply(::AbstractTransform, x::DType, ::Int) = x
+apply(::AbstractTransform, x::NoOp, ::Int) = x
+function apply(::AbstractTransform, x::T, ::Int) where T
+    throw(ArgumentError("Transform expects input to sub-type `DType`, but received $T."))
+end
 
 """
     transform(t::AbstractTransform, dtype::DType, x)
@@ -72,12 +80,12 @@ apply(::AbstractTransform, x, ::Int) = x
 
 Apply the transformation `t` to the input `x` with data type `dtype`.
 """
-apply_transform(t::AbstractTransform, ::Type{T}, x) where T = apply(t, T(x), rand(1:1000))
-apply_transform(t::AbstractTransform, x) = apply(t, x, rand(1:1000))
-function apply_transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
-    return apply_transform(t, ntuple(i -> dtypes[i](x[i]), length(dtypes)))
+transform(t::AbstractTransform, ::Type{T}, x) where {T <: DType} = transform(t, T(x))
+transform(t::AbstractTransform, x) = apply(t, x, rand(1:1000))
+function transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
+    return transform(t, ntuple(i -> dtypes[i](x[i]), length(dtypes)))
 end
-function apply_transform(t::AbstractTransform, x::Tuple)
+function transform(t::AbstractTransform, x::Tuple)
     seed = rand(1:1000)
     map(x -> apply(t, x, seed), x)
 end
@@ -106,30 +114,54 @@ apply(t::Resize{Tuple{Int,Int,Int}}, x::Mask3D, ::Int) = imresize(x, t.sz, metho
 description(x::Resize) = "Resize to $(x.sz)."
 
 """
-    Scale(;lower=0.02, upper=0.98)
+    Scale(lower::Vector{<:Real}, upper::Vector{<:Real})
 
 Apply a linear stretch to scale all values to the range [0, 1]. The arguments `lower` and
-`upper` specify the percentiles at which to define the lower and upper bounds from the source
-array. Values that either fall below `lower` or above `upper` will be clamped.
+`upper` specify the lower and upper bounds from each channel in the source image. Values that 
+either fall below `lower` or above `upper` will be clamped.
+
+# Parameters
+- `lower`: The lower-bounds to use for each channel in the source image.
+- `upper`: The upper-bounds to use for each channel in the source image.
+"""
+struct Scale <: AbstractTransform
+    lower::Vector{Float64}
+    upper::Vector{Float64}
+    Scale(lower::Vector{Float64}, upper::Vector{Float64}) = new(lower, upper)
+    Scale(lower::Vector{<:Real}, upper::Vector{<:Real}) = Scale(Float64.(lower), Float64.(upper))
+end
+
+description(x::Scale) = "Scale values to [0, 1]."
+
+apply(t::Scale, x::Image2D, ::Int) = linear_stretch(x, t.lower, t.upper, 3)
+apply(t::Scale, x::Image3D, ::Int) = linear_stretch(x, t.lower, t.upper, 4)
+apply(t::Scale, x::Series2D, ::Int) = linear_stretch(x, t.lower, t.upper, 4)
+
+"""
+    PerImageScale(;lower=0.02, upper=0.98)
+
+Apply a linear stretch to scale all values to the range [0, 1]. The arguments `lower` and
+`upper` specify the percentiles at which to define the lower and upper bounds from each channel
+in the source image. Values that either fall below `lower` or above `upper` will be clamped.
 
 # Parameters
 - `lower`: The quantile to use as the lower-bound in the source array.
 - `upper`: The quantile to use as the upper-bound in the source array.
 """
-struct Scale{B<:Tuple} <: AbstractTransform
+struct PerImageScale{B<:Tuple} <: AbstractTransform
     bounds::B
 end
 
 function Scale(;lower=0.02, upper=0.98)
     @argcheck 0 <= lower <= upper <= 1
-    return Scale((lower, upper))
+    return PerImageScale((lower, upper))
 end
 
-description(x::Scale) = "Scale values to [0, 1]."
+description(x::PerImageScale) = "Scale values to [0, 1]."
 
-apply(t::Scale, x::Image2D, ::Int) = linear_stretch(x, t.bounds[1], t.bounds[2], 3)
-apply(t::Scale, x::Image3D, ::Int) = linear_stretch(x, t.bounds[1], t.bounds[2], 4)
-apply(t::Scale, x::Series2D, ::Int) = linear_stretch(x, t.bounds[1], t.bounds[2], 4)
+apply(t::PerImageScale, x::Image2D, ::Int) = per_image_linear_stretch(x, t.bounds[1], t.bounds[2], 3)
+apply(t::PerImageScale, x::Image3D, ::Int) = per_image_linear_stretch(x, t.bounds[1], t.bounds[2], 4)
+apply(t::PerImageScale, x::Series2D, ::Int) = per_image_linear_stretch(x, t.bounds[1], t.bounds[2], 4)
 
 """
     Normalize(;mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -162,21 +194,9 @@ calculated for each image in a batch.
 """
 struct PerImageNormalize <: AbstractTransform end
 
-apply(::PerImageNormalize, x::Image2D, ::Int) = _per_image_normalize(x, 3)
-apply(::PerImageNormalize, x::Image3D, ::Int) = _per_image_normalize(x, 4)
-apply(::PerImageNormalize, x::Series2D, ::Int) = _per_image_normalize(x, 3)
-
-function _per_image_normalize(x::AbstractArray{<:Real,N}, channel_dim::Int) where N
-    dst = copy(x)
-    for i in axes(x)[N]
-        img = selectdim(x, N, i:i) |> collect
-        dims = filter(!=(channel_dim), ntuple(identity, N))
-        μ = mean(img, dims=dims) |> vec |> collect
-        σ = std(img, dims=dims) |> vec |> collect
-        selectdim(dst, N, i:i) .= normalize(img, μ, σ, dim=channel_dim)
-    end
-    return dst
-end
+apply(::PerImageNormalize, x::Image2D, ::Int) = per_image_normalize(x, 3)
+apply(::PerImageNormalize, x::Image3D, ::Int) = per_image_normalize(x, 4)
+apply(::PerImageNormalize, x::Series2D, ::Int) = per_image_normalize(x, 3)
 
 description(x::PerImageNormalize) = "Normalize with per-image statistics."
 
