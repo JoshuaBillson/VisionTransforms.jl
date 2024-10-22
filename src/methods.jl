@@ -154,7 +154,7 @@ normalize(x::AbstractArray{<:Integer}, μ::AbstractVector, σ::AbstractVector; k
 function normalize(x::AbstractArray{T,N}, μ::AbstractVector, σ::AbstractVector; dim=1) where {T<:AbstractFloat,N}
     @argcheck 1 <= dim <= N
     @argcheck length(μ) == length(σ) == size(x,dim)
-    return (x .- vec2array(T.(μ), N, dim)) ./ vec2array(T.(σ), N, dim)
+    return (x .- vec2array(T.(μ), x, dim)) ./ vec2array(T.(σ), x, dim)
 end
 
 """
