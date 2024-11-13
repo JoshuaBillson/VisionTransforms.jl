@@ -9,6 +9,7 @@ using ArgCheck: @argcheck
 using Pipe: @pipe
 
 include("utils.jl")
+include("types.jl")
 
 include("methods.jl")
 export image2tensor, tensor2image, imresize, linear_stretch, per_image_linear_stretch, normalize, per_image_normalize

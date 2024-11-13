@@ -50,11 +50,17 @@ function _imresize(img::AbstractArray, sz::Tuple, method::Symbol)
 end
 
 """
+    linear_stretch(x::Image2D, lower::Vector{<:Real}, upper::Vector{<:Real})
+    linear_stretch(x::Image3D, lower::Vector{<:Real}, upper::Vector{<:Real})
+    linear_stretch(x::Series2D, lower::Vector{<:Real}, upper::Vector{<:Real})
     linear_stretch(x::AbstractArray, lower::Vector{<:Real}, upper::Vector{<:Real}, channel_dim::Int)
 
 Perform a linear histogram stretch on `x` such that `lower` is mapped to 0 and `upper` is mapped to 1.
 Values outside the interval `[lower, upper]` will be clamped.
 """
+linear_stretch(x::Image2D, lower::Vector{<:Real}, upper::Vector{<:Real}) = linear_stretch(x, lower, upper, 3)
+linear_stretch(x::Image3D, lower::Vector{<:Real}, upper::Vector{<:Real}) = linear_stretch(x, lower, upper, 4)
+linear_stretch(x::Series2D, lower::Vector{<:Real}, upper::Vector{<:Real}) = linear_stretch(x, lower, upper, 3)
 function linear_stretch(x::AbstractArray{<:Real,N}, lower::Vector{<:Real}, upper::Vector{<:Real}, channel_dim::Int) where N
     @argcheck 1 <= channel_dim <= N
     lower = vec2array(lower, x, channel_dim)
@@ -63,12 +69,18 @@ function linear_stretch(x::AbstractArray{<:Real,N}, lower::Vector{<:Real}, upper
 end
 
 """
+    per_image_linear_stretch(x::Image2D, lower::Real, upper::Real)
+    per_image_linear_stretch(x::Image3D, lower::Real, upper::Real)
+    per_image_linear_stretch(x::Series2D, lower::Real, upper::Real)
     per_image_linear_stretch(x::AbstractArray, lower::Real, upper::Real, channel_dim::Int)
 
 Apply a linear stretch to scale all values to the range [0, 1]. The arguments `lower` and
 `upper` specify the percentiles at which to define the lower and upper bounds from each channel
 in the source image. Values that either fall below `lower` or above `upper` will be clamped.
 """
+per_image_linear_stretch(x::Image2D, lower::Real, upper::Real) = per_image_linear_stretch(x, lower, upper, 3)
+per_image_linear_stretch(x::Image3D, lower::Real, upper::Real) = per_image_linear_stretch(x, lower, upper, 4)
+per_image_linear_stretch(x::Series2D, lower::Real, upper::Real) = per_image_linear_stretch(x, lower, upper, 3)
 function per_image_linear_stretch(x::AbstractArray{<:Real,N}, lower::Real, upper::Real, channel_dim::Int) where N
     @argcheck 0 <= lower <= upper <= 1
     @argcheck 1 <= channel_dim <= N
@@ -88,13 +100,17 @@ end
 Crop a tile equal to `size` out of `x` with an upper-left corner defined by `ul`.
 """
 crop(x::AbstractArray, sz::Int, ul=(1,1)) = crop(x, (sz, sz), ul)
-function crop(x::AbstractArray, sz::Tuple{Int,Int}, ul=(1,1))
+function crop(x::AbstractArray, sz::Tuple, ul::Tuple)
+    # Arg Checks
+    @argcheck length(sz) == length(ul)
+    @argcheck all(sz .>= 1)
+    @argcheck all(1 .<= ul .<= _size(x))
+
     # Compute Lower-Right Coordinates
     lr = ul .+ sz .- 1
 
     # Check Bounds
-    any(sz .< 1) && throw(ArgumentError("Crop size must be positive!"))
-    (any(ul .< 1) || any(lr .> _size(x))) && throw(ArgumentError("Crop is out of bounds!"))
+    any(lr .> _size(x)) && throw(ArgumentError("Crop is out of bounds!"))
 
     # Crop Tile
     return _crop(x, ul[1]:lr[1], ul[2]:lr[2])
@@ -107,6 +123,19 @@ _crop(x::AbstractArray{<:Any,3}, xdims::AbstractVector, ydims::AbstractVector) =
 _crop(x::AbstractArray{<:Any,4}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:]
 _crop(x::AbstractArray{<:Any,5}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:]
 _crop(x::AbstractArray{<:Any,6}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:,:]
+
+"""
+    random_crop(seed::Int, x::AbstractArray, sz::Tuple{Int,Int})
+
+Crop a randomly placed tile equal to `sz` from the array `x`.
+"""
+function random_crop(seed::Int, x::AbstractArray, sz::Tuple{Int,Int})
+    @argcheck all(sz .>= 1)
+    lower_bounds = first.(axes(x))[1:2]
+    upper_bounds = last.(axes(x))[1:2] .- sz .+ 1
+    ul = random_point(seed, lower_bounds, upper_bounds)
+    return crop(x, sz, ul)
+end
 
 """
     flipX(x)
@@ -150,15 +179,21 @@ and the standard deviation is 1.
 - `σ`: A `Vector` of standard deviations for each index in `dim`.
 - `dim`: The dimension along which to normalize the input array.
 """
-normalize(x::AbstractArray{<:Integer}, μ::AbstractVector, σ::AbstractVector; kw...) = normalize(Float32.(x), μ, σ; kw...)
-function normalize(x::AbstractArray{T,N}, μ::AbstractVector, σ::AbstractVector; dim=1) where {T<:AbstractFloat,N}
+normalize(x::AbstractArray{<:Integer}, args...) = normalize(Float32.(x), args...)
+normalize(x::Image2D, μ::AbstractVector, σ::AbstractVector) = normalize(x, μ, σ, 3)
+normalize(x::Image3D, μ::AbstractVector, σ::AbstractVector) = normalize(x, μ, σ, 4)
+normalize(x::Series2D, μ::AbstractVector, σ::AbstractVector) = normalize(x, μ, σ, 3)
+function normalize(x::AbstractArray{T,N}, μ::AbstractVector, σ::AbstractVector, dim::Int) where {T<:AbstractFloat,N}
     @argcheck 1 <= dim <= N
     @argcheck length(μ) == length(σ) == size(x,dim)
     return (x .- vec2array(T.(μ), x, dim)) ./ vec2array(T.(σ), x, dim)
 end
 
 """
-    per_image_normalize(x::AbstractArray, channel_dim::Int)
+    per_image_normalize(x::Image2D)
+    per_image_normalize(x::Image3D)
+    per_image_normalize(x::Series2D)
+    per_image_normalize(x::AbstractArray, dims::Tuple)
 
 Normalize the input array so that the mean and standard deviation of each channel is 0 and 1, respectively.
 Unlike `normalize`, this method will compute new statistics for each image in `x`. This is more computationally
@@ -166,12 +201,13 @@ expensive, but may be more suitable when there is significant domain shift betwe
 
 # Parameters
 - `x`: A tensor containing one or more 2D or 3D images or 2D image series.
-- `channel_dim`: The dimension corresponding to the image channels.
+- `dims`: The dimensions over which to compute image statistics.
 """
-per_image_normalize(x::AbstractArray{<:Integer}, channel_dim::Int) = per_image_normalize(Float32.(x), channel_dim)
-function per_image_normalize(x::AbstractArray{<:AbstractFloat,N}, channel_dim::Int) where N
-    @argcheck 1 <= channel_dim <= N
-    dims = filter(x -> x != channel_dim && x != N, ntuple(identity, N))
+per_image_normalize(x::Image2D) = per_image_normalize(x, (1,2))
+per_image_normalize(x::Image3D) = per_image_normalize(x, (1,2,3))
+per_image_normalize(x::Series2D) = per_image_normalize(x, (1,2,4))
+per_image_normalize(x::AbstractArray{<:Integer}, args...) = per_image_normalize(Float32.(x), args...)
+function per_image_normalize(x::AbstractArray{<:AbstractFloat,N}, dims) where N
     μ = mean(x, dims=dims)
     σ = std(x, dims=dims)
     return (x .- μ) ./ σ
@@ -212,3 +248,7 @@ function multiply_noise(rng::Random.AbstractRNG, dist::Distributions.Distributio
     noise = rand(rng, dist, noise_dim) .|> T
     return x .* noise
 end
+
+_channeldim(::Type{<:Image2D}) = 3
+_channeldim(::Type{<:Image3D}) = 4
+_channeldim(::Type{<:Series2D}) = 3
