@@ -206,6 +206,29 @@ apply(t::Rot90, x::DType, seed::Int) = roll_dice(seed, t.p) ? rot90(x) : x
 
 description(x::Rot90) = "Random 90 degree rotation with probability $(round(x.p, digits=2))."
 
+# ColorJitter
+
+"""
+    ColorJitter(;contrast=0.8:0.1:1.2, brightness=-0.2:0.1:0.2)
+
+Apply a random color jittering transformations (contrast and brightness adjustments)
+according to the formula `α * x + β * M`, where `α` is contrast, `β` is brightness, 
+and `M` is either the mean or maximum value of `x`.
+"""
+struct ColorJitter{C,B} <: AbstractTransform
+    contrast::C
+    brightness::B
+end
+
+function ColorJitter(;contrast::AbstractVector{<:Real}=0.8:0.1:1.2, brightness::AbstractVector{<:Real}=-0.2:0.1:0.2)
+    return ColorJitter(contrast, brightness)
+end
+
+apply(::ColorJitter, x::NoOp, ::Int) = x
+apply(t::ColorJitter, x::AbstractImage, seed::Int) = color_jitter(MersenneTwister(seed), x, t.contrast, t.brightness)
+
+description(x::ColorJitter) = "Apply random color jitter."
+
 # Composed Transform
 
 """
