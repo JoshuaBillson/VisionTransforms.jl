@@ -39,8 +39,7 @@ struct Resize{S<:Tuple} <: AbstractTransform
     sz::S
 end
 
-apply(t::Resize, x::AbstractMask, ::Int) = imresize(x, t.sz, method=:nearest)
-apply(t::Resize, x::AbstractImage, ::Int) = imresize(x, t.sz, method=:bilinear)
+apply(t::Resize, x::Union{<:AbstractMask,<:AbstractImage}, ::Int) = imresize(x, t.sz)
 
 description(x::Resize) = "Resize to $(x.sz)."
 

@@ -13,11 +13,12 @@ include("types.jl")
 
 include("methods.jl")
 export image2tensor, tensor2image, imresize, linear_stretch, per_image_linear_stretch, normalize, per_image_normalize
-export crop, flipX, flipY, rot90, add_noise, multiply_noise
+export crop, flipX, flipY, rot90, add_noise, multiply_noise, color_jitter
 
 include("transforms.jl")
 export DType, AbstractImage, AbstractMask, Image2D, Image3D, Mask2D, Mask3D, Series2D, NoOp, AbstractTransform
 export transform, apply
 export Resize, Scale, PerImageScale, Normalize, PerImageNormalize, RandomCrop, FlipX, FlipY, Rot90, ComposedTransform
+export ColorJitter
 
 end

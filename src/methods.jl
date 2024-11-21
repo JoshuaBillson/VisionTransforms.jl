@@ -32,10 +32,31 @@ Resize `img` to `sz` with the specified resampling `method`.
 - `sz`: The width and height of the output as a tuple.
 - `method`: Either `:nearest` or `:bilinear`.
 """
-function imresize(img::AbstractArray{<:Real,N}, sz::Tuple; method=:bilinear) where {N}
+imresize(img::Mask2D, sz::Tuple) = imresize(img.data, sz, :nearest, 3) |> Mask2D
+imresize(img::Mask3D, sz::Tuple) = imresize(img.data, sz, :nearest, 4) |> Mask3D
+imresize(img::Image2D, sz::Tuple) = imresize(img.data, sz, :bilinear, 3) |> Image2D
+imresize(img::Image3D, sz::Tuple) = imresize(img.data, sz, :bilinear, 4) |> Image3D
+imresize(img::Series2D, sz::Tuple) = imresize(img.data, sz, :bilinear, 3) |> Series2D
+function imresize(img::AbstractArray{<:Real,N}, sz::Tuple, method::Symbol, channeldim::Int) where {N}
     @argcheck method in (:nearest, :bilinear)
+    @argcheck channeldim < N
+
+    # Iterate Over Observations
     dst = similar(img, _newsize(sz,img))
-    dst .= _imresize(collect(selectdim(img, N, 1)), sz, method)
+    for obs in 1:size(img,N)
+        _dst = selectdim(dst, N, obs)
+        _img = selectdim(img, N, obs)
+
+        # Handle Singleton Channels
+        if size(img, channeldim) == 1
+            _dst = selectdim(_dst, channeldim, 1)
+            _img = selectdim(_img, channeldim, 1)
+        end
+
+        # Resize Image
+        _dst .= _imresize(_img, sz, method)
+    end
+
     return dst
 end
 
@@ -236,12 +257,12 @@ color_jitter(rng::Random.AbstractRNG, x::Image3D, contrast, brightness; kw...) =
 color_jitter(rng::Random.AbstractRNG, x::Series2D, contrast, brightness; kw...) = color_jitter(rng, x, contrast, brightness, (1,2,4); kw...)
 color_jitter(rng::Random.AbstractRNG, x::AbstractArray, contrast, brightness, dims; usemax=true) = _color_jitter(rng, x, contrast, brightness, dims, usemax)
 
-function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{<:Real,N}, contrast::AbstractVector{<:Real}, brightness::AbstractVector{<:Real}, dims::Tuple, usemax::Bool) where N
+function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T,N}, contrast::AbstractVector{<:Real}, brightness::AbstractVector{<:Real}, dims::Tuple, usemax::Bool) where {T<:Real,N}
     rand_dim = ntuple(i -> i == N ? size(x,N) : 1, N)
-    α = rand(rng, contrast, rand_dim)
-    β = rand(rng, brightness, rand_dim)
-    M = usemax ? maximum(x, dims=dims) : mean(x, dims=dims)
-    return (x .* α) .+ (β .* M)
+    α = rand(rng, contrast, rand_dim) .|> T
+    β = rand(rng, brightness, rand_dim) .|> T
+    #M = usemax ? maximum(x, dims=dims) : mean(x, dims=dims)
+    return (x .* α) .+ β
 end
 
 """
