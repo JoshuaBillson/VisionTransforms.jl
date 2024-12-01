@@ -46,6 +46,8 @@ struct NoOp{T,N} <: DType{T,N}
 end
 
 for dtype = (:Image2D, :Image3D, :Series2D, :Mask2D, :Mask3D, :NoOp)
+    @eval Base.parent(x::$dtype) = x.data
+
     @eval Base.size(x::$dtype) = size(x.data)
 
     @eval Base.getindex(x::$dtype, i::Int) = x.data[i]

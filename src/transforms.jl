@@ -2,8 +2,8 @@ import Base.|>
 
 abstract type AbstractTransform end
 
-apply(::AbstractTransform, x::DType, ::Int) = x
 apply(::AbstractTransform, x::NoOp, ::Int) = x
+apply(::AbstractTransform, x::DType, ::Int) = x
 function apply(::AbstractTransform, x::T, ::Int) where T
     throw(ArgumentError("Transform expects input to sub-type `DType`, but received $T."))
 end
@@ -14,14 +14,12 @@ end
 
 Apply the transformation `t` to the input `x` with data type `dtype`.
 """
-transform(t::AbstractTransform, ::Type{T}, x) where {T <: DType} = transform(t, T(x))
-transform(t::AbstractTransform, x) = apply(t, x, rand(1:1000))
+transform(t::AbstractTransform, ::Type{T}, x) where {T <: DType} = apply(t, T(x), rand(1:1000)) |> parent
 function transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
-    return transform(t, ntuple(i -> dtypes[i](x[i]), length(dtypes)))
-end
-function transform(t::AbstractTransform, x::Tuple)
     seed = rand(1:1000)
-    map(x -> apply(t, x, seed), x)
+    map(zip(dtypes, x)) do (T, x)
+        apply(t, T(x), seed) |> parent
+    end
 end
 
 """
@@ -208,7 +206,7 @@ description(x::Rot90) = "Random 90 degree rotation with probability $(round(x.p,
 # ColorJitter
 
 """
-    ColorJitter(;contrast=0.8:0.1:1.2, brightness=-0.2:0.1:0.2)
+    ColorJitter(;contrast=0.5:0.1:1.5, brightness=-0.8:0.1:0.8)
 
 Apply a random color jittering transformations (contrast and brightness adjustments)
 according to the formula `α * x + β * M`, where `α` is contrast, `β` is brightness, 
@@ -219,11 +217,10 @@ struct ColorJitter{C,B} <: AbstractTransform
     brightness::B
 end
 
-function ColorJitter(;contrast::AbstractVector{<:Real}=0.8:0.1:1.2, brightness::AbstractVector{<:Real}=-0.2:0.1:0.2)
+function ColorJitter(;contrast::AbstractVector{<:Real}=0.5:0.1:1.5, brightness::AbstractVector{<:Real}=-0.8:0.1:0.8)
     return ColorJitter(contrast, brightness)
 end
 
-apply(::ColorJitter, x::NoOp, ::Int) = x
 apply(t::ColorJitter, x::AbstractImage, seed::Int) = color_jitter(MersenneTwister(seed), x, t.contrast, t.brightness)
 
 description(x::ColorJitter) = "Apply random color jitter."
