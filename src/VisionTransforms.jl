@@ -1,6 +1,6 @@
 module VisionTransforms
 
-import Images, Distributions
+import Images, Rasters, Distributions
 using Interpolations: Constant, Linear
 using Random
 using Statistics
@@ -12,8 +12,8 @@ include("utils.jl")
 include("types.jl")
 
 include("methods.jl")
-export image2tensor, tensor2image, imresize, linear_stretch, per_image_linear_stretch, normalize, per_image_normalize
-export crop, flipX, flipY, rot90, add_noise, multiply_noise, color_jitter
+export image2tensor, tensor2image, raster2tensor, imresize, linear_stretch, per_image_linear_stretch, normalize, per_image_normalize
+export crop, center_crop, random_crop, flipX, flipY, rot90, color_jitter, invert, solarize, add_noise, multiply_noise
 
 include("transforms.jl")
 export DType, AbstractImage, AbstractMask, Image2D, Image3D, Mask2D, Mask3D, Series2D, NoOp, AbstractTransform

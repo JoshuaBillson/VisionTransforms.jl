@@ -1,4 +1,5 @@
-function image2tensor(image::AbstractArray{<:Images.Colorant,2})
+image2tensor(image::AbstractMatrix{<:Images.Colorant{<:Real,1}}) = image .|> Images.RGB |> image2tensor
+function image2tensor(image::AbstractMatrix{<:Images.Colorant})
     @pipe image |>
     Images.float32.(_) |>
     Images.channelview(_) |>
@@ -20,6 +21,37 @@ function tensor2image(tensor::AbstractArray{<:Real,4}; bands=[1,2,3])
         permutedims(_, (3,2,1)) |> 
         Images.colorview(Images.RGB, _)
     end
+end
+
+function raster2tensor(x::Rasters.AbstractRaster)
+    raster_dims = (Rasters.X,Rasters.Y,Rasters.Z,Rasters.Band,Rasters.Ti)
+    @argcheck Rasters.hasdim(x, Rasters.X)
+    @argcheck Rasters.hasdim(x, Rasters.Y)
+    @argcheck all(dim -> dim in Rasters.name(raster_dims), Rasters.name(Rasters.dims(x)))
+
+    # Handle Missing Band Dimension
+    if !Rasters.hasdim(x, Rasters.Band)  # Add Missing Band Dim
+        return raster2tensor(_putdim(x, Rasters.Band))
+    end
+
+    # Enforce (X,Y,Z,Band,Ti) Order
+    _dims = Rasters.commondims(raster_dims, Rasters.dims(x))  
+    x = _permute(x, _dims)
+
+    # Return Raster Data as Tensor
+    return parent(x) |> _putobs
+end
+
+function _putdim(raster::Rasters.AbstractRaster, ::Type{T}) where {T <: Rasters.DD.Dimension}
+    newdims = (Rasters.dims(raster)..., T(Base.OneTo(1))::T{Base.OneTo{Int64}})
+    return Rasters.Raster(reshape(raster.data, (size(raster)..., 1)), newdims)
+end
+
+function _permute(x::Rasters.AbstractRaster, dims)
+    if Rasters.name(Rasters.dims(x)) == Rasters.name(dims)
+        return x
+    end
+    return permutedims(x, dims)
 end
 
 """
@@ -121,7 +153,7 @@ end
 Crop a tile equal to `size` out of `x` with an upper-left corner defined by `ul`.
 """
 crop(x::AbstractArray, sz::Int, ul=(1,1)) = crop(x, (sz, sz), ul)
-function crop(x::AbstractArray, sz::Tuple, ul::Tuple)
+function crop(x::AbstractArray, sz::Tuple{Int,Int}, ul=(1,1))
     # Arg Checks
     @argcheck length(sz) == length(ul)
     @argcheck all(sz .>= 1)
@@ -137,13 +169,27 @@ function crop(x::AbstractArray, sz::Tuple, ul::Tuple)
     return _crop(x, ul[1]:lr[1], ul[2]:lr[2])
 end
 
-_size(x::AbstractArray) = size(x)[1:2]
+_size(x::AbstractArray)::Tuple{Int,Int} = size(x)[1:2]
 
 _crop(x::AbstractArray{<:Any,2}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims]
 _crop(x::AbstractArray{<:Any,3}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:]
 _crop(x::AbstractArray{<:Any,4}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:]
 _crop(x::AbstractArray{<:Any,5}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:]
 _crop(x::AbstractArray{<:Any,6}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:,:]
+
+"""
+    center_crop(x::AbstractArray, sz::Int)
+    center_crop(x::AbstractArray, sz::Tuple{Int,Int})
+
+Crop `x` to the size specified by `sz` from the center.
+"""
+center_crop(x::AbstractArray, sz::Int) = center_crop(x, (sz,sz))
+function center_crop(x::AbstractArray, sz::Tuple{Int,Int})
+    @argcheck all(1 .<= sz .<= _size(x))
+    pad = _size(x) .- sz
+    ul = (pad .÷ 2) .+ 1
+    return crop(x, sz, ul)
+end
 
 """
     random_crop(seed::Int, x::AbstractArray, sz::Tuple{Int,Int})
@@ -250,20 +296,48 @@ input images or data series according to the formula `α * x + β * M`, where `�
 - `x`: A tensor containing a 2D or 3D image or image series.
 - `correlated`: If true, applies the same noise value to each channel in the image.
 """
-color_jitter(x, contrast, brightness; kw...) = color_jitter(Random.default_rng(), x, contrast, brightness; kw...)
-color_jitter(x, contrast, brightness, dims; kw...) = color_jitter(Random.default_rng(), x, contrast, brightness, dims; kw...)
-color_jitter(rng::Random.AbstractRNG, x::Image2D, contrast, brightness; kw...) = color_jitter(rng, x, contrast, brightness, (1,2); kw...)
-color_jitter(rng::Random.AbstractRNG, x::Image3D, contrast, brightness; kw...) = color_jitter(rng, x, contrast, brightness, (1,2,3); kw...)
-color_jitter(rng::Random.AbstractRNG, x::Series2D, contrast, brightness; kw...) = color_jitter(rng, x, contrast, brightness, (1,2,4); kw...)
-color_jitter(rng::Random.AbstractRNG, x::AbstractArray, contrast, brightness, dims; usemax=true) = _color_jitter(rng, x, contrast, brightness, dims, usemax)
+color_jitter(x, contrast, brightness) = color_jitter(Random.default_rng(), x, contrast, brightness)
+color_jitter(x, contrast, brightness, channeldim) = color_jitter(Random.default_rng(), x, contrast, brightness, channeldim)
+color_jitter(rng::Random.AbstractRNG, x::Image2D, contrast, brightness) = color_jitter(rng, x, contrast, brightness, 3)
+color_jitter(rng::Random.AbstractRNG, x::Image3D, contrast, brightness) = color_jitter(rng, x, contrast, brightness, 4)
+color_jitter(rng::Random.AbstractRNG, x::Series2D, contrast, brightness) = color_jitter(rng, x, contrast, brightness, 3)
+color_jitter(rng::Random.AbstractRNG, x::AbstractArray, contrast, brightness, channeldim) = _color_jitter(rng, x, contrast, brightness, channeldim)
 
-function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T,N}, contrast::AbstractVector{<:Real}, brightness::AbstractVector{<:Real}, dims::Tuple, usemax::Bool) where {T<:Real,N}
+function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T,N}, contrast::AbstractVector{<:Real}, brightness::AbstractVector{<:Real}, channeldim::Int) where {T<:Real,N}
+    # Compute Statistics
+    dims = _fold_dims(x, channeldim)
+    σ = std(x; dims)
+    μ = mean(x; dims)
+
+    # Apply Brightness and Contrast Adjustment
     rand_dim = ntuple(i -> i == N ? size(x,N) : 1, N)
-    α = rand(rng, contrast, rand_dim) .|> T
-    β = rand(rng, brightness, rand_dim) .|> T
-    #M = usemax ? maximum(x, dims=dims) : mean(x, dims=dims)
-    return (x .* α) .+ β
+    α = T.(rand(rng, contrast, rand_dim))
+    β = T.(rand(rng, brightness, rand_dim) .* σ)
+    x = ((x .- μ) .* α .+ μ .+ β)
+
+    # Apply Color Jitter
+    jitter_dim = ntuple(i -> i == channeldim ? size(x,channeldim) : 1, N)
+    jitter = rand(-1.0:0.1:1.0, jitter_dim) .* σ
+    return x .+ jitter
 end
+
+function _fold_dims(::AbstractArray{<:Any,N}, channeldim::Int)::NTuple{N-2,Int} where N
+    return filter(x -> !(x in (channeldim, N)), ntuple(identity, N))
+end
+
+"""
+    invert(x::AbstractArray{<:Real})
+
+Invert the values of `x` according to the formula `maximum(x) .- x`.
+"""
+invert(x::AbstractArray{<:Real}) = maximum(x) .- x
+
+"""
+    solarize(x::AbstractArray{<:Real}; threshold=0.75)
+
+Solarize `x` by inverting all values above `threshold`.
+"""
+solarize(x::AbstractArray{<:Real}; threshold=0.75) = ifelse.(x .> threshold, invert(x), x)
 
 """
     add_noise([rng], dist::Distributions.Distribution, x::AbstractArray; correlated=true)
@@ -276,9 +350,12 @@ Add noise generated by the distribution `dist` to the image tensor `x`.
 - `x`: A tensor containing a 2D or 3D image or image series.
 - `correlated`: If true, applies the same noise value to each channel in the image.
 """
-add_noise(dist::Distributions.Distribution, x::AbstractArray{<:Real}; kw...) = add_noise(Random.default_rng(), dist, x; kw...)
-function add_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::AbstractArray{T}; correlated=true) where {T <: Real}
-    noise_dim = correlated ? (size(x)[1:2]..., 1, size(x)[4:end]...) : size(x)
+add_noise(args...; kw...) = add_noise(Random.default_rng(), args...; kw...)
+add_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::Image2D; kw...) = add_noise(rng, dist, x, 3; kw...)
+add_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::Image3D; kw...) = add_noise(rng, dist, x, 4; kw...)
+add_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::Series2D; kw...) = add_noise(rng, dist, x, 3; kw...)
+function add_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::AbstractArray{T,N}, channeldim::Int; correlated=true) where {T <: Real, N}
+    noise_dim = ntuple(i -> i == channeldim && correlated ? 1 : size(x,i), N)
     noise = rand(rng, dist, noise_dim) .|> T
     return x .+ noise
 end
@@ -294,9 +371,12 @@ Multiply noise generated by the distribution `dist` to the image tensor `x`.
 - `x`: A tensor containing a 2D or 3D image or image series.
 - `correlated`: If true, applies the same noise value to each channel in the image.
 """
-multiply_noise(dist::Distributions.Distribution, x::AbstractArray{<:Real}; kw...) = multiply_noise(Random.default_rng(), dist, x; kw...)
-function multiply_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::AbstractArray{T}; correlated=true) where {T <: Real}
-    noise_dim = correlated ? (size(x)[1:2]..., 1, size(x)[4:end]...) : size(x)
+multiply_noise(args...; kw...) = multiply_noise(Random.default_rng(), args...; kw...)
+multiply_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::Image2D; kw...) = multiply_noise(rng, dist, x, 3; kw...)
+multiply_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::Image3D; kw...) = multiply_noise(rng, dist, x, 4; kw...)
+multiply_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::Series2D; kw...) = multiply_noise(rng, dist, x, 3; kw...)
+function multiply_noise(rng::Random.AbstractRNG, dist::Distributions.Distribution, x::AbstractArray{T,N}, channeldim::Int; correlated=true) where {T <: Real, N}
+    noise_dim = ntuple(i -> i == channeldim && correlated ? 1 : size(x,i), N)
     noise = rand(rng, dist, noise_dim) .|> T
     return x .* noise
 end
