@@ -264,11 +264,11 @@ Randomly solarize an image with probability `p`.
 struct RandomSolarize{T} <: AbstractTransform
     p::Float64
     threshold::T
+end
 
-    function RandomSolarize(p::Float64; threshold=0.75)
-        @argcheck 0 <= p <= 1
-        return new(p, threshold)
-    end
+function RandomSolarize(p::Float64; threshold=0.75)
+    @argcheck 0 <= p <= 1
+    return RandomSolarize(p, threshold)
 end
 
 apply(t::RandomSolarize, x::AbstractImage, seed::Int) = apply_random(x -> solarize(x; t.threshold), seed, t.p, x)
