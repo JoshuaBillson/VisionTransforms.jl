@@ -17,9 +17,10 @@ Apply the transformation `t` to the input `x` with data type `dtype`.
 transform(::AbstractTransform, ::Type{<:NoOp}, x)  = x
 transform(t::AbstractTransform, ::Type{T}, x) where {T <: DType} = apply(t, T(x), rand(1:1000)) |> parent
 function transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
+    @argcheck length(dtypes) == length(x)
     seed = rand(1:1000)
-    map(zip(dtypes, x)) do (T, x)
-        apply(t, T(x), seed) |> parent
+    ntuple(length(dtypes)) do i
+        apply(t, dtypes[i](x[i]), seed) |> parent
     end
 end
 
