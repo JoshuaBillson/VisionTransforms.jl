@@ -39,13 +39,11 @@ struct Mask3D{T} <: AbstractMask{T,5}
     Mask3D(x::Array{T,5}) where T = new{T}(x)
 end
 
-struct NoOp{T,N} <: DType{T,N}
-    data::Array{T,N}
-    NoOp(x::AbstractArray) = Mask3D(Array(x))
-    NoOp(x::Array{T,N}) where {T,N} = new{T,N}(x)
+struct NoOp{T}
+    data::T
 end
 
-for dtype = (:Image2D, :Image3D, :Series2D, :Mask2D, :Mask3D, :NoOp)
+for dtype = (:Image2D, :Image3D, :Series2D, :Mask2D, :Mask3D)
     @eval Base.parent(x::$dtype) = x.data
 
     @eval Base.size(x::$dtype) = size(x.data)

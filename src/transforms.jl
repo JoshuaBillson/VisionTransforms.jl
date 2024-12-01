@@ -9,11 +9,12 @@ function apply(::AbstractTransform, x::T, ::Int) where T
 end
 
 """
-    transform(t::AbstractTransform, dtype::DType, x)
+    transform(t::AbstractTransform, dtype, x)
     transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
 
 Apply the transformation `t` to the input `x` with data type `dtype`.
 """
+transform(::AbstractTransform, ::Type{<:NoOp}, x)  = x
 transform(t::AbstractTransform, ::Type{T}, x) where {T <: DType} = apply(t, T(x), rand(1:1000)) |> parent
 function transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
     seed = rand(1:1000)
@@ -132,10 +133,25 @@ end
 
 RandomCrop(size::Int) = RandomCrop((size, size))
 
-apply(::RandomCrop, x::NoOp, ::Int) = x
 apply(t::RandomCrop, x::DType, seed::Int) = random_crop(seed, x, t.sz)
 
 description(x::RandomCrop) = "Random crop to $(x.sz)."
+
+"""
+    CenterCrop(size::Int)
+    CenterCrop(size::Tuple{Int,Int})
+
+Crop a tile equal to `size` from the center of the input array.
+"""
+struct CenterCrop <: AbstractTransform
+    sz::Tuple{Int,Int}
+end
+
+CenterCrop(sz::Int) = CenterCrop((sz,sz))
+
+apply(t::CenterCrop, x::DType, ::Int) = center_crop(x, t.sz)
+
+description(x::CenterCrop) = "Center crop to $(x.sz)."
 
 # FlipX
 
@@ -149,12 +165,11 @@ struct FlipX <: AbstractTransform
 
     FlipX(p::Real) = FlipX(Float64(p))
     function FlipX(p::Float64)
-        (0 <= p <= 1) || throw(ArgumentError("p must be between 0 and 1!"))
+        @argcheck 0 <= p <= 1
         return new(p)
     end
 end
 
-apply(::FlipX, x::NoOp, ::Int) = x
 apply(t::FlipX, x::DType, seed::Int) = roll_dice(seed, t.p) ? flipX(x) : x
 
 description(x::FlipX) = "Random horizontal flip with probability $(round(x.p, digits=2))."
@@ -171,12 +186,11 @@ struct FlipY <: AbstractTransform
 
     FlipY(p::Real) = FlipY(Float64(p))
     function FlipY(p::Float64)
-        (0 <= p <= 1) || throw(ArgumentError("p must be between 0 and 1!"))
+        @argcheck 0 <= p <= 1
         return new(p)
     end
 end
 
-apply(::FlipY, x::NoOp, ::Int) = x
 apply(t::FlipY, x::DType, seed::Int) = roll_dice(seed, t.p) ? flipY(x) : x
 
 description(x::FlipY) = "Random vertical flip with probability $(round(x.p, digits=2))."
@@ -198,7 +212,6 @@ struct Rot90 <: AbstractTransform
     end
 end
 
-apply(::Rot90, x::NoOp, ::Int) = x
 apply(t::Rot90, x::DType, seed::Int) = roll_dice(seed, t.p) ? rot90(x) : x
 
 description(x::Rot90) = "Random 90 degree rotation with probability $(round(x.p, digits=2))."
@@ -224,6 +237,43 @@ end
 apply(t::ColorJitter, x::AbstractImage, seed::Int) = color_jitter(MersenneTwister(seed), x, t.contrast, t.brightness)
 
 description(x::ColorJitter) = "Apply random color jitter."
+
+"""
+    RandomInvert(p)
+
+Apply a random color inversion with probability `p`.
+"""
+struct RandomInvert <: AbstractTransform
+    p::Float64
+
+    function RandomInvert(p::Float64)
+        @argcheck 0 <= p <= 1
+        return new(p)
+    end
+end
+
+apply(t::RandomInvert, x::AbstractImage, seed::Int) = apply_random(invert, seed, t.p, x)
+
+description(x::RandomInvert) = "Invert colors with probability $(x.p)."
+
+"""
+    RandomSolarize(p; threshold=0.75)
+
+Randomly solarize an image with probability `p`.
+"""
+struct RandomSolarize{T} <: AbstractTransform
+    p::Float64
+    threshold::T
+
+    function RandomSolarize(p::Float64; threshold=0.75)
+        @argcheck 0 <= p <= 1
+        return new(p, threshold)
+    end
+end
+
+apply(t::RandomSolarize, x::AbstractImage, seed::Int) = apply_random(x -> solarize(x; t.threshold), seed, t.p, x)
+
+description(x::RandomSolarize) = "Solarize colors with probability $(x.p)."
 
 # Composed Transform
 

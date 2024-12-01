@@ -61,6 +61,10 @@ function _partition_interval(nbins::Integer, minval::Real, maxval::Real)
     return range(minval, step=(maxval - minval) / nbins, length=nbins)
 end
 
+function apply_random(f, seed::Int, p::Float64, x)
+    return roll_dice(seed, p) ? f(x) : x
+end
+
 function roll_dice(seed::Int, p::Float64)
     @assert 0 <= p <= 1 "p must be between 0 and 1!"
     outcome = rand(Random.MersenneTwister(seed), Random.uniform(Float64))
