@@ -55,7 +55,9 @@ function _permute(x::Rasters.AbstractRaster, dims)
 end
 
 """
-    imresize(img::AbstractArray, sz::Tuple{Int,Int}; method=:bilinear)
+    imresize(img::AbstractMask, sz::Tuple)
+    imresize(img::AbstractImage, sz::Tuple)
+    imresize(img::AbstractArray, sz::Tuple, method::Symbol, channeldim::Int)
 
 Resize `img` to `sz` with the specified resampling `method`.
 
@@ -205,6 +207,45 @@ function random_crop(seed::Int, x::AbstractArray, sz::Tuple{Int,Int})
 end
 
 """
+    center_zoom(x::DType, zoom_strength::Int)
+    center_zoom(x::AbstractArray, zoom_strength::Int, method::Symbol, channeldim::Int)
+
+Zoom to the center of `x` by a factor of `zoom_strength`.
+"""
+function center_zoom(x::DType, zoom_strength::Int)
+    @argcheck zoom_strength >= 1
+    newsize = _size(x) .÷ zoom_strength
+    return @pipe center_crop(x, newsize) |> imresize(_, _size(x))
+end
+function center_zoom(x::AbstractArray, zoom_strength::Int, method::Symbol, channeldim::Int)
+    @argcheck zoom_strength >= 1
+    newsize = _size(x) .÷ zoom_strength
+    return @pipe center_crop(x, newsize) |> imresize(_, _size(x), method, channeldim)
+end
+
+"""
+    random_zoom(seed::Int, x::DType, zoom_strength::Real)
+    random_zoom(seed::Int, x::AbstractArray, zoom_strength::AbstractVector{<:Real}, args...)
+    random_zoom(seed::Int, x::AbstractArray, zoom_strength::Real, method::Symbol, channeldim::Int)
+
+Zoom to a random location in `x` by a factor of `zoom_strength`.
+"""
+function random_zoom(seed::Int, x::AbstractArray, zoom_strength::AbstractVector{<:Real}, args...)
+    @argcheck all(zoom_strength .>= 1)
+    return random_zoom(seed, x, rand(MersenneTwister(seed), zoom_strength), args...)
+end
+function random_zoom(seed::Int, x::DType, zoom_strength::Real)
+    @argcheck zoom_strength >= 1
+    newsize = round.(Int, _size(x) .÷ zoom_strength)
+    return @pipe random_crop(seed, x, newsize) |> imresize(_, _size(x))
+end
+function random_zoom(seed::Int, x::AbstractArray, zoom_strength::Real, method::Symbol, channeldim::Int)
+    @argcheck zoom_strength >= 1
+    newsize = round.(Int, _size(x) .÷ zoom_strength)
+    return @pipe random_crop(seed, x, newsize) |> imresize(_, _size(x), method, channeldim)
+end
+
+"""
     flipX(x)
 
 Flip the image `x` across the horizontal axis.
@@ -247,13 +288,12 @@ and the standard deviation is 1.
 - `dim`: The dimension along which to normalize the input array.
 """
 normalize(x::AbstractArray{<:Integer}, args...) = normalize(Float32.(x), args...)
-normalize(x::Image2D, μ::AbstractVector, σ::AbstractVector) = normalize(x, μ, σ, 3)
-normalize(x::Image3D, μ::AbstractVector, σ::AbstractVector) = normalize(x, μ, σ, 4)
-normalize(x::Series2D, μ::AbstractVector, σ::AbstractVector) = normalize(x, μ, σ, 3)
-function normalize(x::AbstractArray{T,N}, μ::AbstractVector, σ::AbstractVector, dim::Int) where {T<:AbstractFloat,N}
+normalize(x::AbstractImage, μ::AbstractVector, σ::AbstractVector) = normalize(x, μ, σ, _channeldim(x))
+normalize(x::AbstractArray{T}, μ::AbstractVector, σ::AbstractVector, dim::Int) where {T<:AbstractFloat} = normalize(x, T.(μ), T.(σ), dim)
+function normalize(x::AbstractArray{T,N}, μ::AbstractVector{T}, σ::AbstractVector{T}, dim::Int) where {T<:AbstractFloat,N}
     @argcheck 1 <= dim <= N
     @argcheck length(μ) == length(σ) == size(x,dim)
-    return (x .- vec2array(T.(μ), x, dim)) ./ vec2array(T.(σ), x, dim)
+    return (x .- vec2array(μ, x, dim)) ./ vec2array(σ, x, dim)
 end
 
 """
@@ -281,10 +321,58 @@ function per_image_normalize(x::AbstractArray{<:AbstractFloat,N}, dims) where N
 end
 
 """
-    color_jitter([rng], x::Image2D, contrast, brightness; kw...)
-    color_jitter([rng], x::Image3D, contrast, brightness; kw...)
-    color_jitter([rng], x::Series2D, contrast, brightness; kw...)
-    color_jitter([rng], x::AbstractArray, contrast, brightness, dims; usemax=true)
+    grayscale(x::AbstractImage)
+    grayscale(x::AbstractArray, channeldim::Int)
+
+Convert `x` to a grayscale image.
+"""
+grayscale(x::AbstractImage) = grayscale(x, _channeldim(x))
+function grayscale(x::AbstractArray{<:Real,N}, channeldim::Int) where N
+    repeatdims = ntuple(i -> i == channeldim ? size(x,channeldim) : 1, N)
+    return repeat(mean(x, dims=channeldim), repeatdims...)
+end
+
+"""
+    adjust_contrast(x::AbstractImage, contrast::Real)
+    adjust_contrast(x::AbstractArray, contrast::Real, channeldim::Int)
+
+Adjust the contrast of `x` by `contrast`.
+"""
+adjust_contrast(x::AbstractImage, contrast::Real) = adjust_contrast(x, contrast, _channeldim(x))
+function adjust_contrast(x::AbstractArray{T}, contrast::Real, channeldim::Int) where {T<:Real}
+    @argcheck 0 < contrast
+    μ = channel_mean(x, channeldim)
+    return clamp_values!((x .- μ) .* T(contrast) .+ μ, x)
+end
+
+"""
+    adjust_brightness(x::AbstractArray, brightness::Real)
+
+Adjust the brightness of `x` by `brightness`.
+"""
+function adjust_brightness(x::AbstractArray{T}, brightness::Real) where {T <: Real}
+    return clamp_values!(x .+ (T(brightness) * std(x)), x)
+end
+
+"""
+    adjust_hue(x::AbstractImage, strength::Real)
+    adjust_hue(x::AbstractArray, strength::Real, channeldim::Int)
+
+Adjust the hue of `x` by jittering the relative brightness of each channel according to `strength`.
+"""
+adjust_hue(x::AbstractImage, strength::Real) = adjust_hue(x, strength, _channeldim(x))
+function adjust_hue(x::AbstractArray{T,N}, strength::Real, channeldim::Int) where {T<:Real,N}
+    @argcheck strength > 0
+    jitter_dim = ntuple(i -> i == channeldim ? size(x,channeldim) : 1, N)
+    jitter = rand(T.(-strength:0.1:strength), jitter_dim) .* channel_std(x, channeldim)
+    return clamp_values!(x .+ jitter, x)
+end
+
+"""
+    color_jitter(seed::Int, x::Image2D, contrast, brightness; kw...)
+    color_jitter(seed::Int, x::Image3D, contrast, brightness; kw...)
+    color_jitter(seed::Int, x::Series2D, contrast, brightness; kw...)
+    color_jitter(seed::Int, x::AbstractArray, contrast, brightness, dims; usemax=true)
 
 Applies random color jittering transformations (contrast and brightness adjustments) to 
 input images or data series according to the formula `α * x + β * M`, where `α` is contrast,
@@ -296,33 +384,29 @@ input images or data series according to the formula `α * x + β * M`, where `�
 - `x`: A tensor containing a 2D or 3D image or image series.
 - `correlated`: If true, applies the same noise value to each channel in the image.
 """
-color_jitter(x, contrast, brightness) = color_jitter(Random.default_rng(), x, contrast, brightness)
-color_jitter(x, contrast, brightness, channeldim) = color_jitter(Random.default_rng(), x, contrast, brightness, channeldim)
-color_jitter(rng::Random.AbstractRNG, x::Image2D, contrast, brightness) = color_jitter(rng, x, contrast, brightness, 3)
-color_jitter(rng::Random.AbstractRNG, x::Image3D, contrast, brightness) = color_jitter(rng, x, contrast, brightness, 4)
-color_jitter(rng::Random.AbstractRNG, x::Series2D, contrast, brightness) = color_jitter(rng, x, contrast, brightness, 3)
-color_jitter(rng::Random.AbstractRNG, x::AbstractArray, contrast, brightness, channeldim) = _color_jitter(rng, x, contrast, brightness, channeldim)
+color_jitter(seed::Int, x::Image2D, contrast, brightness) = color_jitter(seed, x, contrast, brightness, 3)
+color_jitter(seed::Int, x::Image3D, contrast, brightness) = color_jitter(seed, x, contrast, brightness, 4)
+color_jitter(seed::Int, x::Series2D, contrast, brightness) = color_jitter(seed, x, contrast, brightness, 3)
+color_jitter(seed::Int, x::AbstractArray, contrast, brightness, channeldim) = _color_jitter(seed, x, contrast, brightness, channeldim)
 
-function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T,N}, contrast::AbstractVector{<:Real}, brightness::AbstractVector{<:Real}, channeldim::Int) where {T<:Real,N}
+function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T}, contrast::AbstractVector, brightness::AbstractVector, channeldim::Int) where {T<:Real}
+    return _color_jitter(rng, x, T.(contrast), T.(brightness), channeldim)
+end
+function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T,N}, contrast::AbstractVector{T}, brightness::AbstractVector{T}, channeldim::Int) where {T<:Real,N}
     # Compute Statistics
-    dims = _fold_dims(x, channeldim)
-    σ = std(x; dims)
-    μ = mean(x; dims)
+    σ = channel_std(x, channeldim)
+    μ = channel_mean(x, channeldim)
 
     # Apply Brightness and Contrast Adjustment
     rand_dim = ntuple(i -> i == N ? size(x,N) : 1, N)
-    α = T.(rand(rng, contrast, rand_dim))
-    β = T.(rand(rng, brightness, rand_dim) .* σ)
+    α = rand(rng, contrast, rand_dim)
+    β = rand(rng, brightness, rand_dim) .* σ
     x = ((x .- μ) .* α .+ μ .+ β)
 
     # Apply Color Jitter
     jitter_dim = ntuple(i -> i == channeldim ? size(x,channeldim) : 1, N)
-    jitter = rand(-1.0:0.1:1.0, jitter_dim) .* σ
+    jitter = rand(T.(-1.0:0.1:1.0), jitter_dim) .* σ
     return x .+ jitter
-end
-
-function _fold_dims(::AbstractArray{<:Any,N}, channeldim::Int)::NTuple{N-2,Int} where N
-    return filter(x -> !(x in (channeldim, N)), ntuple(identity, N))
 end
 
 """
@@ -330,14 +414,69 @@ end
 
 Invert the values of `x` according to the formula `maximum(x) .- x`.
 """
-invert(x::AbstractArray{<:Real}) = maximum(x) .- x
+function invert(x::AbstractArray{T}) where {T <: Real}
+    lb, ub = extrema(x)
+	midpoint = (lb + ub) / 2
+	return T(2 * midpoint) .- x  # (midpoint - x) + midpoint = 2 * midpoint - x
+end
 
 """
     solarize(x::AbstractArray{<:Real}; threshold=0.75)
 
 Solarize `x` by inverting all values above `threshold`.
 """
-solarize(x::AbstractArray{<:Real}; threshold=0.75) = ifelse.(x .> threshold, invert(x), x)
+function solarize(x::AbstractArray{<:Real}; threshold=0.75)
+    lb, ub = extrema(x)
+    thresh = ((ub - lb) * threshold) + lb
+    return ifelse.(x .> thresh, invert(x), x)
+end
+
+"""
+    blur(x::AbstractImage, strength::Real)
+    blur(x::AbstractArray, strength::Real, channeldim::Int)
+
+Blur the image `x` by applying a gaussian filter with a standard deviation of `strength`.
+"""
+blur(x::Image2D, strength::Real) = blur(x.data, strength, 3) |> Image2D
+blur(x::Image3D, strength::Real) = blur(x.data, strength, 4) |> Image3D
+blur(x::Series2D, strength::Real) = blur(x.data, strength, 3) |> Series2D
+function blur(x::AbstractArray{<:Real,N}, strength::Real, channeldim::Int) where N
+    @argcheck 0 < channeldim < N
+	dst = deepcopy(x)
+	for i in 1:size(x,N)
+		_dst = selectdim(dst, N, i)
+		_x = selectdim(x, N, i)
+		for j in 1:size(x,channeldim)
+			blurred = Images.imfilter(selectdim(_x, channeldim, j), Images.Kernel.gaussian(strength))
+			selectdim(_dst, channeldim, j) .= blurred
+		end
+	end
+	return dst
+end
+
+"""
+    sharpen(x::AbstractImage, strength::Real)
+    sharpen(x::AbstractArray, strength::Real, channeldim::Int)
+
+Sharpen the image `x` by applying a high-frequency-boosting filter.
+"""
+sharpen(x::Image2D, strength::Real) = sharpen(x.data, strength, 3) |> Image2D
+sharpen(x::Image3D, strength::Real) = sharpen(x.data, strength, 4) |> Image3D
+sharpen(x::Series2D, strength::Real) = sharpen(x.data, strength, 3) |> Series2D
+function sharpen(x::AbstractArray{<:Real,N}, strength::Real, channeldim::Int) where N
+    @argcheck 0 < channeldim < N
+	dst = deepcopy(x)
+	filter = Images.centered([-1 -1 -1; -1 8 -1; -1 -1 -1])
+	for i in 1:size(x,N)
+		_dst = selectdim(dst, N, i)
+		_x = selectdim(x, N, i)
+		for j in 1:size(x,channeldim)
+			filtered = strength * Images.imfilter(selectdim(_x, channeldim, j), filter) .+ selectdim(_x, channeldim, j)
+			selectdim(_dst, channeldim, j) .= filtered
+		end
+	end
+	return clamp_values!(dst, x)
+end
 
 """
     add_noise([rng], dist::Distributions.Distribution, x::AbstractArray; correlated=true)
@@ -381,6 +520,8 @@ function multiply_noise(rng::Random.AbstractRNG, dist::Distributions.Distributio
     return x .* noise
 end
 
-_channeldim(::Type{<:Image2D}) = 3
-_channeldim(::Type{<:Image3D}) = 4
-_channeldim(::Type{<:Series2D}) = 3
+_channeldim(::Image2D) = 3
+_channeldim(::Image3D) = 4
+_channeldim(::Series2D) = 3
+_channeldim(::Mask2D) = 3
+_channeldim(::Mask3D) = 4

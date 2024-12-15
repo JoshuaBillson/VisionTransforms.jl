@@ -64,11 +64,3 @@ for dtype = (:Image2D, :Image3D, :Series2D, :Mask2D, :Mask3D)
         end
     end
 end
-
-Statistics.mean(x::Image2D) = mean(x.data, dims=(1,2,4)) |> vec
-Statistics.mean(x::Image3D) = mean(x.data, dims=(1,2,3,5)) |> vec
-Statistics.mean(x::Series2D) = mean(x.data, dims=(1,2,4,5)) |> vec
-
-Statistics.std(x::Image2D) = std(x.data, dims=(1,2,4)) |> vec
-Statistics.std(x::Image3D) = std(x.data, dims=(1,2,3,5)) |> vec
-Statistics.std(x::Series2D) = std(x.data, dims=(1,2,4,5)) |> vec

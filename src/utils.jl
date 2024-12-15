@@ -81,3 +81,24 @@ function random_point(seed::Int, lower_bounds::Tuple, upper_bounds::Tuple)
     displacement = round.(Int, outcome .* span)
     return lower_bounds .+ displacement
 end
+
+function channel_mean(x::AbstractArray{<:Real,N}, channeldim) where N
+    dims = filter(x -> !(x in (channeldim, N)), ntuple(identity, N))
+    return mean(x; dims)
+end
+
+function channel_std(x::AbstractArray{<:Real,N}, channeldim) where N
+    dims = filter(x -> !(x in (channeldim, N)), ntuple(identity, N))
+    return std(x; dims)
+end
+
+function pixel_extrema(x)
+    lb = min(0, minimum(x))
+    ub = max(1, maximum(x))
+    return (lb, ub)
+end
+
+function clamp_values!(new, old)
+    lb, ub = pixel_extrema(old)
+    return clamp!(new, lb, ub)
+end
