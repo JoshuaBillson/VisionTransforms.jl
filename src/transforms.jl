@@ -297,28 +297,28 @@ function apply(t::TrivialAugment, x::DType, seed::Int)
         :flipx => flipX(x)
         :flipy => flipY(x)
         :zoom => random_zoom(seed, x, LinRange(1.1, 2, 10)[_strength])
-        :contrast => _random_contrast(seed, x, _strength)
-        :brightness => _random_brightness(seed, x, _strength)
+        :contrast => _random_contrast(rng, x, _strength)
+        :brightness => _random_brightness(rng, x, _strength)
         :sharpen => _random_sharpen(x, _strength)
         :blur => _random_blur(x, _strength)
         :solarize => _solarize(x, _strength)
     end
 end
 
-_random_contrast(::Int, x::AbstractMask, ::Int) = x
-function _random_contrast(seed::Int, x::AbstractImage, strength::Int)
+_random_contrast(rng, x::AbstractMask, ::Int) = x
+function _random_contrast(rng, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
     contrast_magnitude = LinRange(0.1, 0.8, 10)[strength]
-    contrast = rand(MersenneTwister(seed), [1 - contrast_magnitude, 1 + contrast_magnitude])
+    contrast = rand(rng, [1 - contrast_magnitude, 1 + contrast_magnitude])
     @info "Contrast" contrast
     return adjust_contrast(x, contrast)
 end
 
-_random_brightness(::Int, x::AbstractMask, ::Int) = x
-function _random_brightness(seed::Int, x::AbstractImage, strength::Int)
+_random_brightness(rng, x::AbstractMask, ::Int) = x
+function _random_brightness(rng, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
     brightness_magnitude = LinRange(0.1, 1.5, 10)[strength]
-    brightness = rand(MersenneTwister(seed), [-brightness_magnitude, brightness_magnitude])
+    brightness = rand(rng, [-brightness_magnitude, brightness_magnitude])
     @info "Brightness" brightness
     return adjust_brightness(x, brightness)
 end
@@ -330,7 +330,7 @@ _random_sharpen(x::AbstractMask, ::Int) = x
 _random_sharpen(x::AbstractImage, strength::Int) = sharpen(x, LinRange(0.1, 1.0, 10)[strength])
 
 _solarize(x::AbstractMask, ::Int) = x
-_solarize(x::AbstractImage, strength::Int) = solarize(x; threshold=LinRange(4.0, 0.25, 10)[strength])
+_solarize(x::AbstractImage, strength::Int) = solarize(x; threshold=LinRange(1.0, 0.1, 10)[strength])
 
 # Composed Transform
 
