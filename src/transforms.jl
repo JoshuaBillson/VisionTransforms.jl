@@ -306,7 +306,7 @@ end
 _random_contrast(::Int, x::AbstractMask, ::Int) = x
 function _random_contrast(seed::Int, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
-    contrast_magnitude = LinRange(0.1, 0.5, 10)[strength]
+    contrast_magnitude = LinRange(0.1, 0.8, 10)[strength]
     contrast = rand(MersenneTwister(seed), [1 - contrast_magnitude, 1 + contrast_magnitude])
     return adjust_contrast(x, contrast)
 end
@@ -314,13 +314,13 @@ end
 _random_brightness(::Int, x::AbstractMask, ::Int) = x
 function _random_brightness(seed::Int, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
-    brightness_magnitude = LinRange(0.1, 1.0, 10)[strength]
+    brightness_magnitude = LinRange(0.1, 2.0, 10)[strength]
     brightness = rand(MersenneTwister(seed), [-brightness_magnitude, brightness_magnitude])
     return adjust_brightness(x, brightness)
 end
 
 _random_blur(x::AbstractMask, ::Int) = x
-_random_blur(x::AbstractImage, strength::Int) = blur(x, strength / 4)
+_random_blur(x::AbstractImage, strength::Int) = blur(x, strength / 2)
 
 _random_sharpen(x::AbstractMask, ::Int) = x
 _random_sharpen(x::AbstractImage, strength::Int) = sharpen(x, LinRange(0.1, 1.0, 10)[strength])
