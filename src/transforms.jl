@@ -310,16 +310,14 @@ function _random_contrast(rng, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
     contrast_magnitude = LinRange(0.1, 0.8, 10)[strength]
     contrast = rand(rng, [1 - contrast_magnitude, 1 + contrast_magnitude])
-    @info "Contrast" contrast
     return adjust_contrast(x, contrast)
 end
 
 _random_brightness(rng, x::AbstractMask, ::Int) = x
 function _random_brightness(rng, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
-    brightness_magnitude = LinRange(0.1, 1.5, 10)[strength]
+    brightness_magnitude = LinRange(0.1, 0.6, 10)[strength]
     brightness = rand(rng, [-brightness_magnitude, brightness_magnitude])
-    @info "Brightness" brightness
     return adjust_brightness(x, brightness)
 end
 
@@ -327,7 +325,7 @@ _random_blur(x::AbstractMask, ::Int) = x
 _random_blur(x::AbstractImage, strength::Int) = blur(x, strength / 2)
 
 _random_sharpen(x::AbstractMask, ::Int) = x
-_random_sharpen(x::AbstractImage, strength::Int) = sharpen(x, LinRange(0.1, 1.0, 10)[strength])
+_random_sharpen(x::AbstractImage, strength::Int) = sharpen(x, LinRange(0.1, 0.8, 10)[strength])
 
 _solarize(x::AbstractMask, ::Int) = x
 _solarize(x::AbstractImage, strength::Int) = solarize(x; threshold=LinRange(1.0, 0.1, 10)[strength])

@@ -351,7 +351,8 @@ end
 Adjust the brightness of `x` by `brightness`.
 """
 function adjust_brightness(x::AbstractArray{T}, brightness::Real) where {T <: Real}
-    return clamp_values!(x .+ (T(brightness) * std(x)), x)
+    lb, ub = pixel_extrema(x)
+    return clamp_values!(x .+ (T(brightness) * (ub - lb)), x)
 end
 
 """
