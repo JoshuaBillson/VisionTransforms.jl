@@ -43,6 +43,8 @@ struct NoOp{T}
     data::T
 end
 
+Base.parent(x::NoOp) = x.data
+
 for dtype = (:Image2D, :Image3D, :Series2D, :Mask2D, :Mask3D)
     @eval Base.parent(x::$dtype) = x.data
 

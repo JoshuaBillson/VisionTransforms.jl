@@ -316,7 +316,7 @@ end
 _random_brightness(rng, x::AbstractMask, ::Int) = x
 function _random_brightness(rng, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
-    brightness_magnitude = LinRange(0.1, 0.6, 10)[strength]
+    brightness_magnitude = LinRange(0.1, 0.45, 10)[strength]
     brightness = rand(rng, [-brightness_magnitude, brightness_magnitude])
     return adjust_brightness(x, brightness)
 end
