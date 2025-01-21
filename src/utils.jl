@@ -83,12 +83,12 @@ function random_point(seed::Int, lower_bounds::Tuple, upper_bounds::Tuple)
 end
 
 function channel_mean(x::AbstractArray{<:Real,N}, channeldim) where N
-    dims = filter(x -> !(x in (channeldim, N)), ntuple(identity, N))
+    dims = filter(x -> x !== channeldim, ntuple(identity, N))
     return mean(x; dims)
 end
 
 function channel_std(x::AbstractArray{<:Real,N}, channeldim) where N
-    dims = filter(x -> !(x in (channeldim, N)), ntuple(identity, N))
+    dims = filter(x -> x !== channeldim, ntuple(identity, N))
     return std(x; dims)
 end
 

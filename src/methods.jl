@@ -3,24 +3,16 @@ function image2tensor(image::AbstractMatrix{<:Images.Colorant})
     @pipe image |>
     Images.float32.(_) |>
     Images.channelview(_) |>
-    permutedims(_, (3,2,1)) |>
-    _putobs(_)
+    permutedims(_, (3,2,1))
 end
 
-_putobs(x::AbstractArray) = reshape(x, size(x)..., 1)
-
-function tensor2image(tensor::AbstractArray{<:Real,4}; bands=[1,2,3])
+function tensor2image(tensor::AbstractArray{<:Real,3}; bands=[1,2,3])
     @argcheck length(bands) == 3
-    if size(tensor, 4) > 1
-        return map(i -> tensor2image(selectdim(tensor, 4, i:i); bands=bands), axes(tensor)[end])
-    else
-        return @pipe tensor |>
-        selectdim(_, 4, 1) |> 
-        selectdim(_, 3, bands) |> 
-        Images.n0f8.(_) |> 
-        permutedims(_, (3,2,1)) |> 
-        Images.colorview(Images.RGB, _)
-    end
+    @pipe tensor |>
+    selectdim(_, 3, bands) |> 
+    Images.n0f8.(_) |> 
+    permutedims(_, (3,2,1)) |> 
+    Images.colorview(Images.RGB, _)
 end
 
 function raster2tensor(x::Rasters.AbstractRaster)
@@ -39,7 +31,7 @@ function raster2tensor(x::Rasters.AbstractRaster)
     x = _permute(x, _dims)
 
     # Return Raster Data as Tensor
-    return parent(x) |> _putobs
+    return parent(x)
 end
 
 function _putdim(raster::Rasters.AbstractRaster, ::Type{T}) where {T <: Rasters.DD.Dimension}
@@ -57,7 +49,7 @@ end
 """
     imresize(img::AbstractMask, sz::Tuple)
     imresize(img::AbstractImage, sz::Tuple)
-    imresize(img::AbstractArray, sz::Tuple, method::Symbol, channeldim::Int)
+    imresize(img::AbstractArray, sz::Tuple, method::Symbol)
 
 Resize `img` to `sz` with the specified resampling `method`.
 
@@ -66,33 +58,18 @@ Resize `img` to `sz` with the specified resampling `method`.
 - `sz`: The width and height of the output as a tuple.
 - `method`: Either `:nearest` or `:bilinear`.
 """
-imresize(img::Mask2D, sz::Tuple) = imresize(img.data, sz, :nearest, 3) |> Mask2D
-imresize(img::Mask3D, sz::Tuple) = imresize(img.data, sz, :nearest, 4) |> Mask3D
-imresize(img::Image2D, sz::Tuple) = imresize(img.data, sz, :bilinear, 3) |> Image2D
-imresize(img::Image3D, sz::Tuple) = imresize(img.data, sz, :bilinear, 4) |> Image3D
-imresize(img::Series2D, sz::Tuple) = imresize(img.data, sz, :bilinear, 3) |> Series2D
-function imresize(img::AbstractArray{<:Real,N}, sz::Tuple, method::Symbol, channeldim::Int) where {N}
+imresize(img::T, sz::Tuple) where {T <: AbstractMask} = imresize(img, sz, :nearest)
+imresize(img::T, sz::Tuple) where {T <: AbstractImage} = imresize(img, sz, :bilinear)
+function imresize(img::AbstractArray{<:Real}, sz::Tuple, method::Symbol)
     @argcheck method in (:nearest, :bilinear)
-    @argcheck channeldim < N
-
-    # Iterate Over Observations
-    dst = similar(img, _newsize(sz,img))
-    for obs in 1:size(img,N)
-        _dst = selectdim(dst, N, obs)
-        _img = selectdim(img, N, obs)
-
-        # Handle Singleton Channels
-        if size(img, channeldim) == 1
-            _dst = selectdim(_dst, channeldim, 1)
-            _img = selectdim(_img, channeldim, 1)
-        end
-
-        # Resize Image
-        _dst .= _imresize(_img, sz, method)
-    end
-
+    @argcheck all(dim -> size(img, dim) > 1, eachindex(sz))
+    newsize = _newsize(sz,img)
+    dst = similar(img, newsize)
+    dst .= @pipe parent(img) |> _drop_singletons |> _imresize(_, sz, :nearest) |> reshape(_, newsize)
     return dst
 end
+
+_drop_singletons(x::AbstractArray) = dropdims(x, dims=tuple(findall(==(1), size(x))...))
 
 _newsize(sz::Tuple{Int,Int}, x::AbstractArray{<:Any,N}) where N = (sz[1], sz[2], size(x)[3:N]...)
 _newsize(sz::Tuple{Int,Int,Int}, x::AbstractArray{<:Any,N}) where N = (sz[1], sz[2], sz[3], size(x)[4:N]...)
@@ -139,7 +116,7 @@ per_image_linear_stretch(x::Series2D, lower::Real, upper::Real) = per_image_line
 function per_image_linear_stretch(x::AbstractArray{<:Real,N}, lower::Real, upper::Real, channel_dim::Int) where N
     @argcheck 0 <= lower <= upper <= 1
     @argcheck 1 <= channel_dim <= N
-    dims = filter(x -> x != channel_dim && x != N, ntuple(identity, N))
+    dims = filter(x -> x != channel_dim, ntuple(identity, N))
     mapslices(x, dims=dims) do x
         data = vec(x) |> collect |> sort!
         lb = quantile(data, 0.02, sorted=true)
@@ -158,8 +135,8 @@ crop(x::AbstractArray, sz::Int, ul=(1,1)) = crop(x, (sz, sz), ul)
 function crop(x::AbstractArray, sz::Tuple{Int,Int}, ul=(1,1))
     # Arg Checks
     @argcheck length(sz) == length(ul)
-    @argcheck all(sz .>= 1)
-    @argcheck all(1 .<= ul .<= _size(x))
+    @argcheck all(1 .<= sz .<= size(x)[1:2])
+    @argcheck all(1 .<= ul .<= size(x)[1:2])
 
     # Compute Lower-Right Coordinates
     lr = ul .+ sz .- 1
@@ -208,7 +185,7 @@ end
 
 """
     center_zoom(x::DType, zoom_strength::Int)
-    center_zoom(x::AbstractArray, zoom_strength::Int, method::Symbol, channeldim::Int)
+    center_zoom(x::AbstractArray, zoom_strength::Int, method::Symbol)
 
 Zoom to the center of `x` by a factor of `zoom_strength`.
 """
@@ -217,10 +194,10 @@ function center_zoom(x::DType, zoom_strength::Int)
     newsize = _size(x) .÷ zoom_strength
     return @pipe center_crop(x, newsize) |> imresize(_, _size(x))
 end
-function center_zoom(x::AbstractArray, zoom_strength::Int, method::Symbol, channeldim::Int)
+function center_zoom(x::AbstractArray, zoom_strength::Int, method::Symbol)
     @argcheck zoom_strength >= 1
     newsize = _size(x) .÷ zoom_strength
-    return @pipe center_crop(x, newsize) |> imresize(_, _size(x), method, channeldim)
+    return @pipe center_crop(x, newsize) |> imresize(_, _size(x), method)
 end
 
 """
@@ -239,10 +216,10 @@ function random_zoom(seed::Int, x::DType, zoom_strength::Real)
     newsize = round.(Int, _size(x) .÷ zoom_strength)
     return @pipe random_crop(seed, x, newsize) |> imresize(_, _size(x))
 end
-function random_zoom(seed::Int, x::AbstractArray, zoom_strength::Real, method::Symbol, channeldim::Int)
+function random_zoom(seed::Int, x::AbstractArray, zoom_strength::Real, method::Symbol)
     @argcheck zoom_strength >= 1
     newsize = round.(Int, _size(x) .÷ zoom_strength)
-    return @pipe random_crop(seed, x, newsize) |> imresize(_, _size(x), method, channeldim)
+    return @pipe random_crop(seed, x, newsize) |> imresize(_, _size(x), method)
 end
 
 """
@@ -272,6 +249,8 @@ flipY(x::AbstractArray{<:Any,6}) = x[end:-1:1,:,:,:,:,:]
 
 Rotate the image `x` by 90 degress. 
 """
+rot90(x::AbstractArray{<:Any,2}) = @pipe permutedims(x, (2,1)) |> reverse(_, dims=2)
+rot90(x::AbstractArray{<:Any,3}) = @pipe permutedims(x, (2,1,3)) |> reverse(_, dims=2)
 rot90(x::AbstractArray{<:Any,4}) = @pipe permutedims(x, (2,1,3,4)) |> reverse(_, dims=2)
 rot90(x::AbstractArray{<:Any,5}) = @pipe permutedims(x, (2,1,3,4,5)) |> reverse(_, dims=2)
 rot90(x::AbstractArray{<:Any,6}) = @pipe permutedims(x, (2,1,3,4,5,6)) |> reverse(_, dims=2)
@@ -390,18 +369,14 @@ color_jitter(seed::Int, x::Image3D, contrast, brightness) = color_jitter(seed, x
 color_jitter(seed::Int, x::Series2D, contrast, brightness) = color_jitter(seed, x, contrast, brightness, 3)
 color_jitter(seed::Int, x::AbstractArray, contrast, brightness, channeldim) = _color_jitter(seed, x, contrast, brightness, channeldim)
 
-function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T}, contrast::AbstractVector, brightness::AbstractVector, channeldim::Int) where {T<:Real}
-    return _color_jitter(rng, x, T.(contrast), T.(brightness), channeldim)
-end
-function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T,N}, contrast::AbstractVector{T}, brightness::AbstractVector{T}, channeldim::Int) where {T<:Real,N}
+function _color_jitter(rng::Random.AbstractRNG, x::AbstractArray{T,N}, contrast::AbstractVector, brightness::AbstractVector, channeldim::Int) where {T<:Real,N}
     # Compute Statistics
     σ = channel_std(x, channeldim)
     μ = channel_mean(x, channeldim)
 
     # Apply Brightness and Contrast Adjustment
-    rand_dim = ntuple(i -> i == N ? size(x,N) : 1, N)
-    α = rand(rng, contrast, rand_dim)
-    β = rand(rng, brightness, rand_dim) .* σ
+    α = rand(rng, T.(contrast))
+    β = rand(rng, T.(brightness)) .* σ
     x = ((x .- μ) .* α .+ μ .+ β)
 
     # Apply Color Jitter
@@ -413,12 +388,12 @@ end
 """
     invert(x::AbstractArray{<:Real})
 
-Invert the values of `x` according to the formula `maximum(x) .- x`.
+Invert the values of `x` around the midpoint.
 """
 function invert(x::AbstractArray{T}) where {T <: Real}
-    lb, ub = extrema(x)
-	midpoint = (lb + ub) / 2
-	return T(2 * midpoint) .- x  # (midpoint - x) + midpoint = 2 * midpoint - x
+    lb, ub = pixel_extrema(x)
+    midpoint = (lb + ub) / 2
+    return T(2 * midpoint) .- x  # (midpoint - x) + midpoint = 2 * midpoint - x
 end
 
 """
@@ -427,7 +402,7 @@ end
 Solarize `x` by inverting all values above `threshold`.
 """
 function solarize(x::AbstractArray{<:Real}; threshold=0.75)
-    lb, ub = extrema(x)
+    lb, ub = pixel_extrema(x)
     thresh = ((ub - lb) * threshold) + lb
     return ifelse.(x .> thresh, invert(x), x)
 end
@@ -438,21 +413,13 @@ end
 
 Blur the image `x` by applying a gaussian filter with a standard deviation of `strength`.
 """
-blur(x::Image2D, strength::Real) = blur(x.data, strength, 3) |> Image2D
-blur(x::Image3D, strength::Real) = blur(x.data, strength, 4) |> Image3D
-blur(x::Series2D, strength::Real) = blur(x.data, strength, 3) |> Series2D
-function blur(x::AbstractArray{<:Real,N}, strength::Real, channeldim::Int) where N
-    @argcheck 0 < channeldim < N
-	dst = deepcopy(x)
-	for i in 1:size(x,N)
-		_dst = selectdim(dst, N, i)
-		_x = selectdim(x, N, i)
-		for j in 1:size(x,channeldim)
-			blurred = Images.imfilter(selectdim(_x, channeldim, j), Images.Kernel.gaussian(strength))
-			selectdim(_dst, channeldim, j) .= blurred
-		end
-	end
-	return dst
+blur(x::Image2D, strength::Real) = blur(x.data, strength, (1,2)) |> Image2D
+blur(x::Image3D, strength::Real) = blur(x.data, strength, (1,2,3)) |> Image3D
+blur(x::Series2D, strength::Real) = blur(x.data, strength, (1,2)) |> Series2D
+function blur(x::AbstractArray{<:Real,N}, strength, dims::Tuple) where N
+    kernel_size = tuple([strength for _ in eachindex(dims)]...)
+    kernel = Images.Kernel.gaussian(kernel_size)
+    return mapslices(x -> Images.imfilter(x, kernel), x; dims)
 end
 
 """
@@ -461,22 +428,26 @@ end
 
 Sharpen the image `x` by applying a high-frequency-boosting filter.
 """
-sharpen(x::Image2D, strength::Real) = sharpen(x.data, strength, 3) |> Image2D
-sharpen(x::Image3D, strength::Real) = sharpen(x.data, strength, 4) |> Image3D
-sharpen(x::Series2D, strength::Real) = sharpen(x.data, strength, 3) |> Series2D
-function sharpen(x::AbstractArray{<:Real,N}, strength::Real, channeldim::Int) where N
-    @argcheck 0 < channeldim < N
-	dst = deepcopy(x)
-	filter = Images.centered([-1 -1 -1; -1 8 -1; -1 -1 -1])
-	for i in 1:size(x,N)
-		_dst = selectdim(dst, N, i)
-		_x = selectdim(x, N, i)
-		for j in 1:size(x,channeldim)
-			filtered = strength * Images.imfilter(selectdim(_x, channeldim, j), filter) .+ selectdim(_x, channeldim, j)
-			selectdim(_dst, channeldim, j) .= filtered
-		end
-	end
-	return clamp_values!(dst, x)
+sharpen(x::Image2D, strength::Real) = sharpen(x.data, strength) |> Image2D
+sharpen(x::Series2D, strength::Real) = sharpen(x.data, strength) |> Series2D
+sharpen(::Image3D, ::Real) = throw(ArgumentError("Sharpening is only supported for 2D images!"))
+function sharpen(x::AbstractArray{<:Real,N}, strength::Real) where N
+    kernel = Images.centered([-1 -1 -1; -1 8 -1; -1 -1 -1])
+    edges = mapslices(x -> Images.imfilter(x, kernel), x, dims=(1,2))
+    return clamp_values!(strength .* edges .+ x, x)
+end
+
+"""
+    posterize(x::AbstractArray, nbits::Int)
+
+Posterize an image `x` by reducing the number of bits for each color channel to `nbits`.
+"""
+function posterize(x::AbstractArray{T}, nbits::Int) where {T <: Real}
+    @argcheck 1 <= nbits <= 8
+    lb, ub = pixel_extrema(x)
+    stretched = (x .- lb) ./ (ub - lb)
+    posterized = Images.Normed{UInt8,nbits}.(stretched)
+    return T.((posterized .* (ub - lb)) .+ lb)
 end
 
 """
