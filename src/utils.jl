@@ -82,6 +82,12 @@ function random_point(seed::Int, lower_bounds::Tuple, upper_bounds::Tuple)
     return lower_bounds .+ displacement
 end
 
+function random_val(seed::Int, lower, upper)
+    span = upper - lower
+    outcome = rand(Random.MersenneTwister(seed), Random.uniform(Float64))
+    return round(Int, outcome * span) + lower
+end
+
 function channel_mean(x::AbstractArray{<:Real,N}, channeldim) where N
     dims = filter(x -> x !== channeldim, ntuple(identity, N))
     return mean(x; dims)
@@ -101,4 +107,19 @@ end
 function clamp_values!(new, old)
     lb, ub = pixel_extrema(old)
     return clamp!(new, lb, ub)
+end
+
+imsize(x::AbstractArray)::Tuple{Int,Int} = size(x)[1:2]
+
+crop_image(x::AbstractArray{<:Any,2}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims]
+crop_image(x::AbstractArray{<:Any,3}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:]
+crop_image(x::AbstractArray{<:Any,4}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:]
+crop_image(x::AbstractArray{<:Any,5}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:]
+crop_image(x::AbstractArray{<:Any,6}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:,:]
+
+
+function exclude_dim(ndims::Integer, dim::Integer)
+    @assert 1 <= ndims
+    @assert 1 <= dim <= ndims
+    return ntuple(i -> i >= dim ? i+1 : i, ndims-1)
 end

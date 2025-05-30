@@ -2,11 +2,7 @@ import Base.|>
 
 abstract type AbstractTransform end
 
-apply(::AbstractTransform, x::NoOp, ::Int) = x
-apply(::AbstractTransform, x::DType, ::Int) = x
-function apply(::AbstractTransform, x::T, ::Int) where T
-    throw(ArgumentError("Transform expects input to sub-type `DType`, but received $T."))
-end
+apply(::AbstractTransform, x::Any, ::Int) = x
 
 """
     transform(t::AbstractTransform, dtype, x)
@@ -14,11 +10,10 @@ end
 
 Apply the transformation `t` to the input `x` with data type `dtype`.
 """
-transform(::AbstractTransform, ::Type{<:NoOp}, x)  = x
-transform(t::AbstractTransform, ::Type{T}, x) where {T <: DType} = apply(t, T(x), rand(1:1000)) |> parent
+transform(t::AbstractTransform, dtype::Type{T}, x) where {T <: DType} = apply(t, T(x), rand(1:10000)) |> parent
 function transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
     @argcheck length(dtypes) == length(x)
-    seed = rand(1:1000)
+    seed = rand(1:10000)
     ntuple(length(dtypes)) do i
         apply(t, dtypes[i](x[i]), seed) |> parent
     end
@@ -39,7 +34,8 @@ struct Resize{S<:Tuple} <: AbstractTransform
     sz::S
 end
 
-apply(t::Resize, x::Union{<:AbstractMask,<:AbstractImage}, ::Int) = imresize(x, t.sz)
+apply(t::Resize, x::AbstractMask, ::Int) = modify(data -> imresize(data, t.sz, :nearest), x)
+apply(t::Resize, x::AbstractImage, ::Int) = modify(data -> imresize(data, t.sz, :bilinear), x)
 
 description(x::Resize) = "Resize to $(x.sz)."
 
@@ -63,7 +59,7 @@ end
 
 description(x::Scale) = "Scale values to [0, 1]."
 
-apply(t::Scale, x::AbstractImage, ::Int) = linear_stretch(x, t.lower, t.upper)
+apply(t::Scale, x::AbstractImage, ::Int) = linear_stretch(x, t.lower, t.upper, channeldim(x))
 
 """
     PerImageScale(;lower=0.02, upper=0.98)
@@ -80,14 +76,16 @@ struct PerImageScale{B<:Tuple} <: AbstractTransform
     bounds::B
 end
 
-function Scale(;lower=0.02, upper=0.98)
+function PerImageScale(;lower=0.02, upper=0.98)
     @argcheck 0 <= lower <= upper <= 1
     return PerImageScale((lower, upper))
 end
 
 description(x::PerImageScale) = "Scale values to [0, 1]."
 
-apply(t::PerImageScale, x::AbstractImage, ::Int) = per_image_linear_stretch(x, t.bounds[1], t.bounds[2])
+function apply(t::PerImageScale, x::AbstractImage, ::Int)
+    modify(data -> per_image_linear_stretch(data, t.bounds[1], t.bounds[2], channeldim(x)), x)
+end
 
 """
     Normalize(;mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -106,7 +104,7 @@ end
 Normalize(;mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) = Normalize(mean, std)
 Normalize(μ::Vector{<:Real}, σ::Vector{<:Real}) = Normalize(Float64.(μ), Float64.(σ))
 
-apply(t::Normalize, x::AbstractImage, ::Int) = normalize(x, t.μ, t.σ)
+apply(t::Normalize, x::AbstractImage, ::Int) = normalize(x, t.μ, t.σ; channeldim=channeldim(x))
 
 description(x::Normalize) = "Normalize channels."
 
@@ -118,7 +116,7 @@ calculated for each image in a batch.
 """
 struct PerImageNormalize <: AbstractTransform end
 
-apply(::PerImageNormalize, x::AbstractImage, ::Int) = per_image_normalize(x)
+apply(::PerImageNormalize, x::AbstractImage, ::Int) = per_image_normalize(x; channeldim=channeldim(x))
 
 description(x::PerImageNormalize) = "Normalize with per-image statistics."
 
@@ -208,7 +206,7 @@ struct Rot90 <: AbstractTransform
 
     Rot90(p::Real) = Rot90(Float64(p))
     function Rot90(p::Float64)
-        (0 <= p <= 1) || throw(ArgumentError("p must be between 0 and 1!"))
+        @argcheck 0 <= p <= 1
         return new(p)
     end
 end
@@ -235,7 +233,7 @@ function ColorJitter(;contrast::AbstractVector{<:Real}=0.5:0.1:1.5, brightness::
     return ColorJitter(contrast, brightness)
 end
 
-apply(t::ColorJitter, x::AbstractImage, seed::Int) = color_jitter(MersenneTwister(seed), x, t.contrast, t.brightness)
+apply(t::ColorJitter, x::AbstractImage, seed::Int) = color_jitter(seed, x, t.contrast, t.brightness, channeldim(x))
 
 description(x::ColorJitter) = "Apply random color jitter."
 
@@ -296,7 +294,7 @@ function apply(t::TrivialAugment, x::DType, seed::Int)
         :rotate => rot90(x)
         :flipx => flipX(x)
         :flipy => flipY(x)
-        :zoom => random_zoom(seed, x, LinRange(1.1, 2, 10)[_strength])
+        :zoom => random_zoom(seed, x, LinRange(1.1, 2, 10)[_strength], :nearest)
         :contrast => _random_contrast(rng, x, _strength)
         :brightness => _random_brightness(rng, x, _strength)
         :sharpen => _random_sharpen(x, _strength)

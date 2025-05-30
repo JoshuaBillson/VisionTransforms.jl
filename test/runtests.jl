@@ -2,18 +2,21 @@ using VisionTransforms
 using Test
 
 @testset "VisionTransforms.jl" begin
-    img = rand(Float32, 256, 256, 3) |> Image2D
-    mask = rand([0, 1], 256, 256, 1) |> Mask2D
+    img = rand(Float32, 256, 256, 3)
+    mask = rand([0, 1], 256, 256, 1)
 
     # Image Resize
-    @test size(imresize(img, (112,112))) == (112,112,3)
-    @test size(imresize(mask, (112,112))) == (112,112,1)
-    @test all(x -> x in (0, 1), imresize(mask, (112,112)))
-    @test size(imresize(img, (512,512))) == (512,512,3)
-    @test size(imresize(mask, (512,512))) == (512,512,1)
-    @test all(x -> x in (0, 1), imresize(mask, (512,512)))
-    @test imresize(img, (256,256)) == img
-    @test imresize(mask, (256,256)) == mask
+    t1 = Resize((112,112))
+    t2 = Resize((512,512))
+    t3 = Resize((256,256))
+    @test size(transform(t1, Image2D, img)) == (112,112,3)
+    @test size(transform(t1, Mask2D, mask)) == (112,112,1)
+    @test all(x -> x in (0, 1), transform(t1, Mask2D, mask))
+    @test size(transform(t2, Image2D, img)) == (512,512,3)
+    @test size(transform(t2, Mask2D, mask)) == (512,512,1)
+    @test all(x -> x in (0, 1), transform(t2, Mask2D, mask))
+    @test transform(t3, Image2D, img) == img
+    @test transform(t3, Mask2D, mask) == mask
 
     # Image Crop
     @test size(crop(img, 128, (1,1))) == (128,128,3)
