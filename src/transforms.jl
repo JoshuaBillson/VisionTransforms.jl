@@ -294,13 +294,20 @@ function apply(t::TrivialAugment, x::DType, seed::Int)
         :rotate => rot90(x)
         :flipx => flipX(x)
         :flipy => flipY(x)
-        :zoom => random_zoom(seed, x, LinRange(1.1, 2, 10)[_strength], :nearest)
+        :zoom => _random_zoom(seed, x, _strength)
         :contrast => _random_contrast(rng, x, _strength)
         :brightness => _random_brightness(rng, x, _strength)
         :sharpen => _random_sharpen(x, _strength)
         :blur => _random_blur(x, _strength)
         :solarize => _solarize(x, _strength)
     end
+end
+
+function _random_zoom(seed::Int, x::AbstractMask, strength::Int)
+    modify(x -> random_zoom(seed, x, LinRange(1.1, 2, 10)[strength], :nearest), x)
+end
+function _random_zoom(seed::Int, x::AbstractImage, strength::Int)
+    modify(x -> random_zoom(seed, x, LinRange(1.1, 2, 10)[strength], :bilinear), x)
 end
 
 _random_contrast(rng, x::AbstractMask, ::Int) = x
@@ -320,10 +327,10 @@ function _random_brightness(rng, x::AbstractImage, strength::Int)
 end
 
 _random_blur(x::AbstractMask, ::Int) = x
-_random_blur(x::AbstractImage, strength::Int) = blur(x, strength / 2)
+_random_blur(x::AbstractImage, strength::Int) = modify(x -> blur(x, strength / 2), x)
 
 _random_sharpen(x::AbstractMask, ::Int) = x
-_random_sharpen(x::AbstractImage, strength::Int) = sharpen(x, LinRange(0.1, 0.8, 10)[strength])
+_random_sharpen(x::AbstractImage, strength::Int) = modify(x -> sharpen(x, LinRange(0.1, 0.8, 10)[strength]), x)
 
 _solarize(x::AbstractMask, ::Int) = x
 _solarize(x::AbstractImage, strength::Int) = solarize(x; threshold=LinRange(1.0, 0.1, 10)[strength])

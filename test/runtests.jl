@@ -28,4 +28,11 @@ using Test
     @test_throws ArgumentError crop(img, 128, (1,-1))
     @test_throws ArgumentError crop(img, 128, (129,130))
     @test_throws ArgumentError crop(img, 128, (0,0))
+
+    # Trivial Augment
+    for i in 1:10
+        @test size(transform(TrivialAugment(), Image2D, img)) == (256,256,3)
+        @test size(transform(TrivialAugment(), Mask2D, mask)) == (256,256,1)
+        @test all(x -> x in (0, 1), transform(TrivialAugment(), Mask2D, mask))
+    end
 end
