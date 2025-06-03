@@ -86,3 +86,7 @@ function Base.similar(bc::Broadcast.Broadcasted{Broadcast.ArrayStyle{D}}, ::Type
 end
 
 modify(f::Function, x::T) where {T <: DType} = T.name.wrapper(f(parent(x)))
+
+Base.mapslices(f, a::T; dims) where {T <: DType} = modify(x -> mapslices(f, x; dims), a)
+
+Base.selectdim(a::T, d::Integer, i) where {T <: DType} = modify(x -> selectdim(x, d, i), a)

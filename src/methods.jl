@@ -148,14 +148,14 @@ end
 
 Flip the image `x` across the horizontal axis.
 """
-flipX(x::AbstractArray) = modify(x -> selectdim(x, 2, size(x,2):-1:1), x)
+flipX(x::AbstractArray) = selectdim(x, 2, size(x,2):-1:1)
 
 """
     flipY(x)
 
 Flip the image `x` across the vertical axis.
 """
-flipY(x::AbstractArray) = modify(x -> selectdim(x, 1, size(x,1):-1:1), x)
+flipY(x::AbstractArray) = selectdim(x, 1, size(x,1):-1:1)
 
 """
     rot90(x)
@@ -239,53 +239,53 @@ function adjust_brightness(x::AbstractArray{T}, brightness::Real) where {T <: Re
 end
 
 """
-    adjust_hue(x::AbstractArray, strength::Real, channeldim::Int)
+    shift_hue(x::AbstractArray, shift::Real, channeldim::Int)
 
-Adjust the hue of `x` by jittering the relative brightness of each channel according to `strength`.
+Shift the hue of `x` in the HSV color space by the amount specified by `shift`.
 """
-function adjust_hue(x::AbstractArray{T,N}, strength::Real, channeldim::Int) where {T<:Real,N}
-    @argcheck strength > 0
-    jitter_dim = ntuple(i -> i == channeldim ? size(x,channeldim) : 1, N)
-    jitter = rand(T.(-strength:0.1:strength), jitter_dim) .* channel_std(x, channeldim)
-    return clamp_values!(x .+ jitter, x)
+function shift_hue(x::AbstractArray{T,N}, shift::Real, channeldim::Int) where {T<:Real,N}
+    @argcheck size(x, channeldim) == 3
+    @argcheck all(x -> 0 <= x <= 1, x)
+    _shift = T.(reshape([shift, 0, 0], (1,1,3)))
+    return @pipe rgb_to_hsv(x) |> ((_ .+ _shift) .% 360) |> hsv_to_rgb
 end
 
 """
-    color_jitter(seed::Int, x::AbstractArray, contrast, brightness, channeldim)
+    color_jitter(seed::Int, x::AbstractArray, strength::Int, channeldim::Int)
 
-Applies random color jittering transformations (contrast and brightness adjustments) to 
-input images or data series according to the formula `α * x + β * M`, where `α` is contrast,
-`β` is brightness, and `M` is either the mean or maximum value of `x`.
+Applies random color jittering transformations (hue, saturation, and brightness) to 
+the input image `x`.
 
 # Parameters
-- `rng`: A random number generator to make the outcome reproducible.
-- `dist`: A `Distributions.Distribution` object from which to sample the noise.
-- `x`: A tensor containing a 2D or 3D image or image series.
-- `correlated`: If true, applies the same noise value to each channel in the image.
+- `seed`: A seed to make the outcome reproducible.
+- `x`: A tensor containing an RGB image or image series.
+- `strength`: The strength of the jittering, from 1 to 10.
+- `channeldim`: The dimension corresponding to channels in `x`.
 """
-color_jitter(seed::Int, x::AbstractArray, contrast, brightness, channeldim) = _color_jitter(seed, x, contrast, brightness, channeldim)
-
-function _color_jitter(seed::Int, x::AbstractArray{T,N}, contrast::AbstractVector, brightness::AbstractVector, channeldim::Int) where {T<:Real,N}
-    # Compute Statistics
-    σ = channel_std(x, channeldim)
-    μ = channel_mean(x, channeldim)
-
-    # Apply Brightness and Contrast Adjustment
-    rng = Random.MersenneTwister(seed)
-    α = rand(rng, T.(contrast))
-    β = rand(rng, T.(brightness)) .* σ
-    x = ((x .- μ) .* α .+ μ .+ β)
-
-    # Apply Color Jitter
-    jitter_dim = ntuple(i -> i == channeldim ? size(x,channeldim) : 1, N)
-    jitter = rand(T.(-1.0:0.1:1.0), jitter_dim) .* σ
-    return x .+ jitter
+function color_jitter(seed::Int, x::AbstractArray{T}, strength::Int, channeldim::Int) where {T <: Real}
+    @argcheck 1 <= strength <= 10
+    @argcheck size(x, channeldim) == 3
+    rng = MersenneTwister(seed)
+    hue_shift = LinRange(20,180,10)[strength] * rand(rng, [-1,1])
+    saturation_shift = LinRange(0.05,0.20,10)[strength] * rand(rng, [-1,1])
+    value_shift = LinRange(0.05,0.20,10)[strength] * rand(rng, [-1,1])
+    shift = vec2array([hue_shift, saturation_shift, value_shift], x, channeldim)
+    @pipe rgb_to_hsv(x) |> ((_ .+ shift) .% 360) |> hsv_to_rgb
 end
 
 """
-    invert(x::AbstractArray{<:Real})
+    permute_channels(x::AbstractArray, channeldim::Int)
 
-Invert the values of `x` around the midpoint.
+Permute the channel ordering of `x`.
+"""
+function permute_channels(x::AbstractArray, channeldim::Int)
+    return selectdim(x, channeldim, Random.randperm(size(x,channeldim)))
+end
+
+"""
+    invert_color(x::AbstractArray{<:Real})
+
+Invert the colors of `x`.
 """
 function invert(x::AbstractArray{T}) where {T <: Real}
     lb, ub = pixel_extrema(x)

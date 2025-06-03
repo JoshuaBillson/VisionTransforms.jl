@@ -19,21 +19,21 @@ function _quantiles(x::AbstractArray{<:Real}, lower, upper, dim::Int)
 end
 
 function _quantiles(x::AbstractVector{<:Real}, lower, upper)
-	# Build Histogram
-	edges, counts = @pipe build_histogram(x, 10000)
+    # Build Histogram
+    edges, counts = @pipe build_histogram(x, 10000)
 
-	# Get Percentiles
-	ps = cumsum(counts) ./ sum(counts)
+    # Get Percentiles
+    ps = cumsum(counts) ./ sum(counts)
 
-	# Get Lower and Upper Bounds
-	lb = @pipe findfirst(>=(lower), ps) |> clamp(_, 1, 10000) |> edges[_]
-	ub = @pipe findfirst(>=(upper), ps) |> clamp(_, 1, 10000) |> edges[_]
-	return (lb, ub)
+    # Get Lower and Upper Bounds
+    lb = @pipe findfirst(>=(lower), ps) |> clamp(_, 1, 10000) |> edges[_]
+    ub = @pipe findfirst(>=(upper), ps) |> clamp(_, 1, 10000) |> edges[_]
+    return (lb, ub)
 end
 
 function build_histogram(img, nbins)
-	minval = minimum(img)
-	maxval = maximum(img)
+    minval = minimum(img)
+    maxval = maximum(img)
     edges = _partition_interval(nbins, minval, maxval)
     return _build_histogram(img, edges)
 end
@@ -45,9 +45,9 @@ function _build_histogram(img, edges::AbstractRange)
     inv_step_size = 1/step(edges)
     counts = fill(0, lb:ub)
     @inbounds for val in img
-		if isnan(val) || ismissing(val) || isnothing(val)
-			continue
-		elseif val >= last_edge
+        if isnan(val) || ismissing(val) || isnothing(val)
+            continue
+        elseif val >= last_edge
             counts[ub] += 1
         else
             index = floor(Int, ((val-first_edge)*inv_step_size)) + 1
@@ -117,9 +117,83 @@ crop_image(x::AbstractArray{<:Any,4}, xdims::AbstractVector, ydims::AbstractVect
 crop_image(x::AbstractArray{<:Any,5}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:]
 crop_image(x::AbstractArray{<:Any,6}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:,:]
 
-
 function exclude_dim(ndims::Integer, dim::Integer)
     @assert 1 <= ndims
     @assert 1 <= dim <= ndims
     return ntuple(i -> i >= dim ? i+1 : i, ndims-1)
+end
+
+# Adapted from https://github.com/JuliaGraphics/Colors.jl/blob/master/src/conversions.jl
+function rgb_to_hsv(x::AbstractVector{T}) where {T <: Real}
+    # Find Minimum and Maximum Channels
+    min_val, min_index = findmin(x)
+    max_val, max_index = findmax(x)
+
+    # Grayscale
+    s0 = max_val - min_val
+    s0 == zero(T) && return [zero(T), zero(T), max_val]
+
+    # Compute Saturation
+    s = s0 / max_val
+
+    # Compute Hue
+    diff = (max_index == 1 ? x[2]-x[3] : (max_index == 2 ? x[3]-x[1] : x[1]-x[2]))
+    ofs = (max_index == 1 ? (x[2]<x[3])*T(360) : (max_index == 2 ? T(120) : T(240)))
+    h0 = diff * T(60) / s0
+    
+    # Return HCV
+    return [h0 + ofs, s, max_val]
+end
+
+function rgb_to_hsv(x::AbstractArray{T,3}) where {T <: Real}
+    @assert size(x,3) == 3
+    @assert all(x -> 0.0 <= x <= 1.0, x)
+    return mapslices(rgb_to_hsv, x; dims=3)
+end
+
+# Adapted from https://github.com/JuliaGraphics/Colors.jl/blob/master/src/conversions.jl
+function hsv_to_rgb(x::AbstractVector{T}) where {T <: Real}
+    h = T(x[1] / 60)
+    s = T(clamp(x[2], 0, 1))
+    v = T(clamp(x[3], 0, 1))
+
+    hi = unsafe_trunc(Int32, h) # instead of floor
+    i = h < 0 ? hi - one(hi) : hi
+    f = i & one(i) == zero(i) ? 1 - (h - i) : h - i
+    im = 0x1 << (mod6(UInt8, i) & 0x07)
+    
+    # use `@fastmath` just to reduce the estimated costs for inlining
+    @fastmath m = v * (1 - s)
+    @fastmath n = v * (1 - s * f)
+
+    rgb = _hsx_to_rgb(im, v, n, m)
+    T <: ImageCore.FixedPoint && typemax(T) >= 1 ? rgb .% T : rgb
+end
+
+function hsv_to_rgb(x::AbstractArray{T,3}) where {T <: Real}
+    @assert size(x,3) == 3
+    mapslices(hsv_to_rgb, x; dims=3)
+end
+
+# Taken from https://github.com/JuliaGraphics/Colors.jl/blob/master/src/utilities.jl
+function mod6(::Type{T}, x::Int32) where T
+    return unsafe_trunc(T, x - 6 * ((widemul(x, 0x2aaaaaaa) + Int64(0x20000000)) >> 0x20))
+end
+
+# Adapted from https://github.com/JuliaGraphics/Colors.jl/blob/master/src/conversions.jl
+function _hsx_to_rgb(im::UInt8, v, n, m)
+    #=
+    if     hue <  60; im = 0b000001 # ---------+
+    elseif hue < 120; im = 0b000010 # --------+|
+    elseif hue < 180; im = 0b000100 # -------+||
+    elseif hue < 240; im = 0b001000 # ------+|||
+    elseif hue < 300; im = 0b010000 # -----+||||
+    else            ; im = 0b100000 # ----+|||||
+    end                             #     ||||||
+    (hue < 60 || hue >= 300) === ((im & 0b100001) != 0x0)
+    =#
+    r = ifelse((im & 0b100001) == 0x0, ifelse((im & 0b010010) == 0x0, m, n), v)
+    g = ifelse((im & 0b000110) == 0x0, ifelse((im & 0b001001) == 0x0, m, n), v)
+    b = ifelse((im & 0b011000) == 0x0, ifelse((im & 0b100100) == 0x0, m, n), v)
+    return [r, g, b]
 end

@@ -281,7 +281,7 @@ end
 description(x::TrivialAugment) = "Apply Trivial Augmentation."
 
 function TrivialAugment(; 
-    transforms = [:identity, :rotate, :flipx, :flipy, :zoom, :contrast, :brightness, :sharpen, :blur, :solarize] )
+    transforms = [:identity, :rotate, :flipx, :flipy, :zoom, :contrast, :brightness, :sharpen, :blur, :solarize, :grayscale, :permute_channels, :color_jitter] )
     return TrivialAugment(transforms)
 end
 
@@ -300,6 +300,9 @@ function apply(t::TrivialAugment, x::DType, seed::Int)
         :sharpen => _random_sharpen(x, _strength)
         :blur => _random_blur(x, _strength)
         :solarize => _solarize(x, _strength)
+        :grayscale => _grayscale(x)
+        :permute_channels => _permute_channels(x)
+        :color_jitter => _color_jitter(seed, x, _strength)
     end
 end
 
@@ -313,7 +316,7 @@ end
 _random_contrast(rng, x::AbstractMask, ::Int) = x
 function _random_contrast(rng, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
-    contrast_magnitude = LinRange(0.1, 0.8, 10)[strength]
+    contrast_magnitude = LinRange(0.05, 0.5, 10)[strength]
     contrast = rand(rng, [1 - contrast_magnitude, 1 + contrast_magnitude])
     return adjust_contrast(x, contrast)
 end
@@ -321,7 +324,7 @@ end
 _random_brightness(rng, x::AbstractMask, ::Int) = x
 function _random_brightness(rng, x::AbstractImage, strength::Int)
     @argcheck 1 <= strength <= 10
-    brightness_magnitude = LinRange(0.1, 0.45, 10)[strength]
+    brightness_magnitude = LinRange(0.05, 0.30, 10)[strength]
     brightness = rand(rng, [-brightness_magnitude, brightness_magnitude])
     return adjust_brightness(x, brightness)
 end
@@ -334,6 +337,15 @@ _random_sharpen(x::AbstractImage, strength::Int) = modify(x -> sharpen(x, LinRan
 
 _solarize(x::AbstractMask, ::Int) = x
 _solarize(x::AbstractImage, strength::Int) = solarize(x; threshold=LinRange(1.0, 0.1, 10)[strength])
+
+_grayscale(x::AbstractMask) = x
+_grayscale(x::AbstractImage) = grayscale(x, channeldim(x))
+
+_permute_channels(x::AbstractMask) = x
+_permute_channels(x::AbstractImage) = permute_channels(x, channeldim(x))
+
+_color_jitter(::Int, x::AbstractMask, ::Int) = x
+_color_jitter(seed::Int, x::AbstractImage, strength::Int) = color_jitter(seed, x, strength, channeldim(x))
 
 # Composed Transform
 
