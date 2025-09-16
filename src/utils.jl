@@ -1,3 +1,19 @@
+image2tensor(image::AbstractMatrix{<:ImageCore.Colorant{<:Real,1}}) = image .|> ImageCore.RGB |> image2tensor
+function image2tensor(image::AbstractMatrix{<:ImageCore.Colorant})
+    @pipe image |>
+    ImageCore.float32.(_) |>
+    ImageCore.channelview(_) |>
+    permutedims(_, (3,2,1))
+end
+
+function tensor2image(tensor::AbstractArray{T,3}; bands=[1,2,3]) where {T<:Real}
+    @argcheck length(bands) == 3
+    @pipe tensor |>
+    _[:,:,bands] |>
+    permutedims(_, (3,2,1)) |> 
+    ImageCore.colorview(ImageCore.RGB{T}, _)
+end
+
 vec2array(x::AbstractVector, to::AbstractArray{T}, dim::Int) where T = vec2array(T.(x), to, dim)
 function vec2array(x::AbstractVector{T}, to::AbstractArray{T,N}, dim::Int) where {T,N}
     @argcheck 0 < dim <= N
@@ -61,30 +77,43 @@ function _partition_interval(nbins::Integer, minval::Real, maxval::Real)
     return range(minval, step=(maxval - minval) / nbins, length=nbins)
 end
 
-function apply_random(f, seed::Int, p::Float64, x)
-    return roll_dice(seed, p) ? f(x) : x
+function _linear_stretch(x::AbstractArray{<:Real,N}) where N
+    lb = minimum(x, dims=(1:N-1...,))
+    ub = maximum(x, dims=(1:N-1...,))
+    return clamp!((x .- lb) ./ (ub .- lb), 0, 1)
 end
 
-function roll_dice(seed::Int, p::Float64)
+function scaled_map(f::Function, x::AbstractArray{T,N}; clamp=true) where {T,N}
+    # Scale Values to the Range [0,1]
+    lb = minimum(x, dims=(1:N-1...,))
+    ub = maximum(x, dims=(1:N-1...,))
+    scaled_x = (x .- lb) ./ (ub .- lb)
+
+    # Apply f
+    transformed_scaled_x = f(scaled_x)
+
+    # Clamp Values
+    if clamp
+        clamp01!(transformed_scaled_x)
+    end
+
+    # Restore Original Scale
+    return (transformed_scaled_x .* (ub .- lb)) .+ lb
+end
+
+rng_from_seed(seed::Int) = Random.MersenneTwister(seed)
+
+apply_random(f, seed::Int, p::Float64, x) = roll_dice(seed, p) ? f(x) : x
+
+function roll_dice(rng, p::Float64)
     @assert 0 <= p <= 1 "p must be between 0 and 1!"
-    outcome = rand(Random.MersenneTwister(seed), Random.uniform(Float64))
+    outcome = rand(rng, Random.uniform(Float64))
     return outcome <= p
-end
-
-function random_point(seed::Int, lower_bounds::Tuple, upper_bounds::Tuple)
-    @argcheck length(lower_bounds) == length(upper_bounds)
-    @argcheck all(lower_bounds .< upper_bounds)
-    rng = Random.MersenneTwister(seed)
-    dims = length(lower_bounds)  # dimension of the space to be sampled
-    span = upper_bounds .- lower_bounds
-    outcome = ntuple(_ -> rand(rng, Random.uniform(Float64)), dims)
-    displacement = round.(Int, outcome .* span)
-    return lower_bounds .+ displacement
 end
 
 function random_val(seed::Int, lower, upper)
     span = upper - lower
-    outcome = rand(Random.MersenneTwister(seed), Random.uniform(Float64))
+    outcome = rand(rng_from_seed(seed), Random.uniform(Float64))
     return round(Int, outcome * span) + lower
 end
 
@@ -104,18 +133,14 @@ function pixel_extrema(x)
     return (lb, ub)
 end
 
+clamp01!(x) = clamp!(x, 0, 1)
+
 function clamp_values!(new, old)
     lb, ub = pixel_extrema(old)
     return clamp!(new, lb, ub)
 end
 
-imsize(x::AbstractArray)::Tuple{Int,Int} = size(x)[1:2]
-
-crop_image(x::AbstractArray{<:Any,2}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims]
-crop_image(x::AbstractArray{<:Any,3}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:]
-crop_image(x::AbstractArray{<:Any,4}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:]
-crop_image(x::AbstractArray{<:Any,5}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:]
-crop_image(x::AbstractArray{<:Any,6}, xdims::AbstractVector, ydims::AbstractVector) = x[xdims,ydims,:,:,:,:]
+imsize(x::AbstractArray{T,N}) where {T,N} = size(x)[1:N-1]
 
 function exclude_dim(ndims::Integer, dim::Integer)
     @assert 1 <= ndims

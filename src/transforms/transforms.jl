@@ -4,40 +4,22 @@ abstract type AbstractTransform end
 
 apply(::AbstractTransform, x::Any, ::Int) = x
 
-"""
-    transform(t::AbstractTransform, dtype, x)
-    transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
+outsize(::AbstractTransform, insize::Tuple) = insize
 
-Apply the transformation `t` to the input `x` with data type `dtype`.
 """
-transform(t::AbstractTransform, dtype::Type{T}, x) where {T <: DType} = apply(t, T(x), rand(1:10000)) |> parent
-function transform(t::AbstractTransform, dtypes::Tuple, x::Tuple)
-    @argcheck length(dtypes) == length(x)
+    transform(t::AbstractTransform, item, x)
+    transform(t::AbstractTransform, items::Tuple, x::Tuple)
+
+Apply the transformation `t` to the input `x` with data type `item`.
+"""
+transform(t::AbstractTransform, ::Type{T}, x) where {T <: Item} = apply(t, T(x), rand(1:10000)) |> parent
+function transform(t::AbstractTransform, items::Tuple, x::Tuple)
+    @argcheck length(items) == length(x)
     seed = rand(1:10000)
-    ntuple(length(dtypes)) do i
-        apply(t, dtypes[i](x[i]), seed) |> parent
+    ntuple(length(items)) do i
+        apply(t, items[i](x[i]), seed) |> parent
     end
 end
-
-"""
-    Resize(sz::Tuple)
-
-Resample `x` according to the specified `scale`. `Mask` types will always be
-resampled with `:near` interpolation, whereas `Images` will be resampled with 
-either `:bilinear` (`scale` > `1`) or `:average` (`scale` < `1`).
-
-# Parameters
-- `x`: The image/mask to be resampled.
-- `sz`: The size of the output image.
-"""
-struct Resize{S<:Tuple} <: AbstractTransform
-    sz::S
-end
-
-apply(t::Resize, x::AbstractMask, ::Int) = modify(data -> imresize(data, t.sz, :nearest), x)
-apply(t::Resize, x::AbstractImage, ::Int) = modify(data -> imresize(data, t.sz, :bilinear), x)
-
-description(x::Resize) = "Resize to $(x.sz)."
 
 """
     Scale(lower::Vector{<:Real}, upper::Vector{<:Real})
@@ -120,159 +102,36 @@ apply(::PerImageNormalize, x::AbstractImage, ::Int) = per_image_normalize(x; cha
 
 description(x::PerImageNormalize) = "Normalize with per-image statistics."
 
-"""
-    RandomCrop(size::Int)
-    RandomCrop(size::Tuple{Int,Int})
-
-Crop a randomly placed tile equal to `size` from the input array.
-"""
-struct RandomCrop <: AbstractTransform
-    sz::Tuple{Int,Int}
-end
-
-RandomCrop(size::Int) = RandomCrop((size, size))
-
-apply(t::RandomCrop, x::DType, seed::Int) = random_crop(seed, x, t.sz)
-
-description(x::RandomCrop) = "Random crop to $(x.sz)."
-
-"""
-    CenterCrop(size::Int)
-    CenterCrop(size::Tuple{Int,Int})
-
-Crop a tile equal to `size` from the center of the input array.
-"""
-struct CenterCrop <: AbstractTransform
-    sz::Tuple{Int,Int}
-end
-
-CenterCrop(sz::Int) = CenterCrop((sz,sz))
-
-apply(t::CenterCrop, x::DType, ::Int) = center_crop(x, t.sz)
-
-description(x::CenterCrop) = "Center crop to $(x.sz)."
-
-# FlipX
-
-"""
-    FlipX(p)
-
-Apply a random horizontal flip with probability `p`.
-"""
-struct FlipX <: AbstractTransform
-    p::Float64
-
-    FlipX(p::Real) = FlipX(Float64(p))
-    function FlipX(p::Float64)
-        @argcheck 0 <= p <= 1
-        return new(p)
-    end
-end
-
-apply(t::FlipX, x::DType, seed::Int) = roll_dice(seed, t.p) ? flipX(x) : x
-
-description(x::FlipX) = "Random horizontal flip with probability $(round(x.p, digits=2))."
-
-# FlipY
-
-"""
-    FlipY(p)
-
-Apply a random vertical flip with probability `p`.
-"""
-struct FlipY <: AbstractTransform
-    p::Float64
-
-    FlipY(p::Real) = FlipY(Float64(p))
-    function FlipY(p::Float64)
-        @argcheck 0 <= p <= 1
-        return new(p)
-    end
-end
-
-apply(t::FlipY, x::DType, seed::Int) = roll_dice(seed, t.p) ? flipY(x) : x
-
-description(x::FlipY) = "Random vertical flip with probability $(round(x.p, digits=2))."
-
-# Rot90
-
-"""
-    Rot90(p)
-
-Apply a random 90 degree rotation with probability `p`.
-"""
-struct Rot90 <: AbstractTransform
-    p::Float64
-
-    Rot90(p::Real) = Rot90(Float64(p))
-    function Rot90(p::Float64)
-        @argcheck 0 <= p <= 1
-        return new(p)
-    end
-end
-
-apply(t::Rot90, x::DType, seed::Int) = roll_dice(seed, t.p) ? rot90(x) : x
-
-description(x::Rot90) = "Random 90 degree rotation with probability $(round(x.p, digits=2))."
-
 # ColorJitter
 
-"""
-    ColorJitter(;contrast=0.5:0.1:1.5, brightness=-0.8:0.1:0.8)
-
-Apply a random color jittering transformations (contrast and brightness adjustments)
-according to the formula `α * x + β * M`, where `α` is contrast, `β` is brightness, 
-and `M` is either the mean or maximum value of `x`.
-"""
-struct ColorJitter{C,B} <: AbstractTransform
-    contrast::C
-    brightness::B
-end
-
-function ColorJitter(;contrast::AbstractVector{<:Real}=0.5:0.1:1.5, brightness::AbstractVector{<:Real}=-0.8:0.1:0.8)
-    return ColorJitter(contrast, brightness)
-end
-
-apply(t::ColorJitter, x::AbstractImage, seed::Int) = color_jitter(seed, x, t.contrast, t.brightness, channeldim(x))
-
-description(x::ColorJitter) = "Apply random color jitter."
-
-"""
-    RandomInvert(p)
-
-Apply a random color inversion with probability `p`.
-"""
-struct RandomInvert <: AbstractTransform
+struct ApplyRandom{T<:AbstractTransform} <: AbstractTransform
     p::Float64
-
-    function RandomInvert(p::Float64)
-        @argcheck 0 <= p <= 1
-        return new(p)
-    end
+    transform::T
 end
 
-apply(t::RandomInvert, x::AbstractImage, seed::Int) = apply_random(invert, seed, t.p, x)
-
-description(x::RandomInvert) = "Invert colors with probability $(x.p)."
-
-"""
-    RandomSolarize(p; threshold=0.75)
-
-Randomly solarize an image with probability `p`.
-"""
-struct RandomSolarize{T} <: AbstractTransform
-    p::Float64
-    threshold::T
+function ApplyRandom(t, p::Real)
+    @argcheck 0 <= p <= 1 "p must be between 0 and 1!"
+    return ApplyRandom(p, t)
 end
 
-function RandomSolarize(p::Float64; threshold=0.75)
-    @argcheck 0 <= p <= 1
-    return RandomSolarize(p, threshold)
+description(t::ApplyRandom) = "$(description(t.transform)) with probability $(t.p)."
+
+function apply(t::ApplyRandom, x, seed::Int)
+    outcome = rand(rng_from_seed(seed), Random.uniform(Float64))
+    return outcome <= t.p ? apply(t.transform, x, seed) : x
 end
 
-apply(t::RandomSolarize, x::AbstractImage, seed::Int) = apply_random(x -> solarize(x; t.threshold), seed, t.p, x)
+struct OneOf{T} <: AbstractTransform
+    transforms::T
+end
 
-description(x::RandomSolarize) = "Solarize colors with probability $(x.p)."
+description(t::OneOf) = join(t.transforms, " or ") * "."
+
+function apply(t::OneOf, x, seed::Int)
+    rng = rng_from_seed(seed)
+    transform = rand(rng, t.transforms)
+    return apply(transform, x, rand(rng,1:10000))
+end
 
 struct TrivialAugment <: AbstractTransform
     transforms::Vector{Symbol}
@@ -285,8 +144,8 @@ function TrivialAugment(;
     return TrivialAugment(transforms)
 end
 
-function apply(t::TrivialAugment, x::DType, seed::Int)
-    rng = MersenneTwister(seed)
+function apply(t::TrivialAugment, x::Item, seed::Int)
+    rng = rng_from_seed(seed)
     _transform = rand(rng, t.transforms)
     _strength = rand(rng, 1:10)
     @match _transform begin
@@ -375,8 +234,8 @@ struct ComposedTransform{T} <: AbstractTransform
     end
 end
 
-function apply(t::ComposedTransform, x::DType, seed::Int)
-    seeds = rand(MersenneTwister(seed), 1:10000, length(t.transforms))
+function apply(t::ComposedTransform, x::Item, seed::Int)
+    seeds = rand(rng_from_seed(seed), 1:10000, length(t.transforms))
     for (s, t) in zip(seeds, t.transforms)
         x = apply(t, x, s)
     end

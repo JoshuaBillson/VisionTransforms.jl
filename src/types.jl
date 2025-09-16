@@ -1,92 +1,62 @@
-abstract type DType{T,N} <: AbstractArray{T,N} end
+abstract type Item{T,N,A} <: AbstractArray{T,N} end
 
-abstract type AbstractImage{T,N} <: DType{T,N} end
+Base.parent(x::Item) = x.data
 
-abstract type AbstractMask{T,N} <: DType{T,N} end
+abstract type AbstractRaster{T,N,A} <: Item{T,N,A} end
 
-struct Image2D{T} <: AbstractImage{T,3}
-    data::Array{T,3}
-    Image2D(x::AbstractArray{<:Any,3}) = Image2D(Array(x))
-    Image2D(x::AbstractArray{<:ImageCore.Colorant,2}) = Image2D(image2tensor(x))
-    Image2D(x::Array{T,3}) where T = new{T}(x)
-    Image2D{T}(x::Array{T,3}) where T = new{T}(x)
+abstract type AbstractImage{T,N,A} <: AbstractRaster{T,N,A} end
+
+abstract type AbstractMask{T,N,A} <: AbstractRaster{T,N,A} end
+
+struct Image{T,N,A} <: AbstractImage{T,N,A}
+    data::A
+    Image(x::AbstractArray{T,N}) where {T,N} = new{T,N,typeof(x)}(x)
+    #Image(x::AbstractArray{<:ImageCore.Colorant,N}) where N = Image(image2tensor(x))
 end
 
-Base.parent(x::Image2D) = x.data
-
-channeldim(::Image2D) = 3
-
-struct Image3D{T} <: AbstractImage{T,4}
-    data::Array{T,4}
-    Image3D(x::AbstractArray{<:Any,4}) = Image3D(Array(x))
-    Image3D(x::Array{T,4}) where T = new{T}(x)
-    Image3D{T}(x::Array{T,4}) where T = new{T}(x)
+struct Mask{T,N,A} <: AbstractMask{T,N,A}
+    data::A
+    Mask(x::AbstractArray{T,N}) where {T,N} = new{T,N,typeof(x)}(x)
 end
-
-Base.parent(x::Image3D) = x.data
-
-channeldim(::Image3D) = 4
-
-struct Series2D{T} <: AbstractImage{T,4}
-    data::Array{T,4}
-    Series2D(x::AbstractArray{<:Any,4}) = Series2D(Array(x))
-    Series2D(x::Array{T,4}) where T = new{T}(x)
-    Series2D{T}(x::Array{T,4}) where T = new{T}(x)
-    function Series2D(x::AbstractVector{<:AbstractArray{<:ImageCore.Colorant,2}})
-        @pipe map(image2tensor, x) |> map(x -> unsqueeze(x, 4), _) |> cat(_..., dims=4)
-    end
-end
-
-Base.parent(x::Series2D) = x.data
-
-channeldim(::Series2D) = 3
-
-struct Mask2D{T} <: AbstractMask{T,3}
-    data::Array{T,3}
-    Mask2D(x::AbstractArray{<:Any,3}) = Mask2D(Array(x))
-    Mask2D(x::Array{T,3}) where T = new{T}(x)
-    Mask2D{T}(x::Array{T,3}) where T = new{T}(x)
-end
-
-Base.parent(x::Mask2D) = x.data
-
-channeldim(::Mask2D) = 3
-
-struct Mask3D{T} <: AbstractMask{T,4}
-    data::Array{T,4}
-    Mask3D(x::AbstractArray{<:Any,4}) = Mask3D(Array(x))
-    Mask3D(x::Array{T,4}) where T = new{T}(x)
-    Mask3D{T}(x::Array{T,4}) where T = new{T}(x)
-end
-
-Base.parent(x::Mask3D) = x.data
-
-channeldim(::Mask3D) = 4
 
 struct NoOp{T}
     data::T
 end
 
-Base.parent(x::NoOp) = x.data
+Base.size(x::Item, args...) = size(parent(x), args...)
 
-Base.size(x::DType) = size(parent(x))
-
-Base.getindex(x::DType, i::Int) = parent(x)[i]
-
-Base.setindex!(x::DType, v, i::Int) = Base.setindex!(parent(x), v, i)
-
-Base.IndexStyle(::Type{<:D}) where {D<:DType} = IndexLinear()
-
-Base.similar(x::D, ::Type{T}, dims::Dims) where {D<:DType,T} = D.name.wrapper(Base.similar(parent(x), T, dims))
-
-Base.BroadcastStyle(::Type{<:D}) where {D<:DType} = Broadcast.ArrayStyle{D}()
-
-function Base.similar(bc::Broadcast.Broadcasted{Broadcast.ArrayStyle{D}}, ::Type{T}) where {D<:DType,T}
-    return D.name.wrapper(similar(Array{T}, axes(bc)))
+function Base.getindex(x::I, i...) where {I<:Item}
+    result = Base.getindex(parent(x), i...)
+    return result isa AbstractArray ? I.name.wrapper(result) : result
 end
 
-modify(f::Function, x::T) where {T <: DType} = T.name.wrapper(f(parent(x)))
+function Base.view(x::I, i...) where {I<:Item}
+    result = Base.view(parent(x), i...)
+    return result isa AbstractArray ? I.name.wrapper(result) : result
+end
 
-Base.mapslices(f, a::T; dims) where {T <: DType} = modify(x -> mapslices(f, x; dims), a)
+Base.setindex!(x::Item, v, i...) = Base.setindex!(parent(x), v, i...)
 
-Base.selectdim(a::T, d::Integer, i) where {T <: DType} = modify(x -> selectdim(x, d, i), a)
+Base.permutedims(x::I, perm) where {I<:Item} = I.name.wrapper(permutedims(parent(x), perm))
+
+Base.IndexStyle(::Type{<:Item{T,N,A}}) where {T,N,A} = Base.IndexStyle(A)
+
+Base.similar(x::I, ::Type{T}, dims::Dims) where {I<:Item,T} = I.name.wrapper(Base.similar(parent(x), T, dims))
+
+Base.BroadcastStyle(::Type{<:I}) where {I<:Item} = Broadcast.ArrayStyle{I}()
+
+function Base.similar(bc::Broadcast.Broadcasted{Broadcast.ArrayStyle{I}}, ::Type{T}) where {I<:Item,T}
+    return I.name.wrapper(similar(Array{T,length(axes(bc))}, axes(bc)))
+end
+
+function modify(f::Function, x::I) where {I<:Item}
+    return I.name.wrapper(f(parent(x)))
+end
+
+function ImageCore.channelview(x::AbstractRaster) 
+    return modify(x -> Array(ImageCore.channelview(x)), x)
+end
+
+function ImageCore.colorview(C::Type{<:ImageCore.Colorant}, x::AbstractRaster) 
+    return modify(x -> Array(ImageCore.colorview(C, x)), x)
+end

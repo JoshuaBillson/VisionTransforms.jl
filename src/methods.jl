@@ -1,44 +1,3 @@
-image2tensor(image::AbstractMatrix{<:ImageCore.Colorant{<:Real,1}}) = image .|> ImageCore.RGB |> image2tensor
-function image2tensor(image::AbstractMatrix{<:ImageCore.Colorant})
-    @pipe image |>
-    ImageCore.float32.(_) |>
-    ImageCore.channelview(_) |>
-    permutedims(_, (3,2,1))
-end
-
-function tensor2image(tensor::AbstractArray{<:Real,3}; bands=[1,2,3])
-    @argcheck length(bands) == 3
-    @pipe tensor |>
-    selectdim(_, 3, bands) |> 
-    ImageCore.n0f8.(_) |> 
-    permutedims(_, (3,2,1)) |> 
-    ImageCore.colorview(ImageCore.RGB, _)
-end
-
-"""
-    imresize(img::AbstractArray, sz::Tuple, method::Symbol)
-
-Resize `img` to `sz` with the specified resampling `method`.
-
-# Parameters
-- `img`: The image to be resized.
-- `sz`: The width and height of the output as a tuple.
-- `method`: Either `:nearest` or `:bilinear`.
-"""
-function imresize(img::AbstractArray{<:Real,N1}, sz::NTuple{N2,Int}, method::Symbol) where {N1,N2}
-    @argcheck N1 >= N2
-    @argcheck method in (:nearest, :bilinear)
-    @argcheck all(dim -> size(img, dim) > 1, eachindex(sz))
-    return mapslices(x -> _imresize(x, sz, method), img; dims=ntuple(identity, N2))
-end
-
-function _imresize(img::AbstractArray, sz::Tuple, method::Symbol)
-    @match method begin
-        :nearest => ImageTransformations.imresize(img, sz, method=Constant())
-        :bilinear => ImageTransformations.imresize(img, sz, method=Linear())
-    end
-end
-
 """
     linear_stretch(x::AbstractArray, lower::Vector{<:Real}, upper::Vector{<:Real}, channel_dim::Int)
 
@@ -70,100 +29,6 @@ function per_image_linear_stretch(x::AbstractArray{<:Real,N}, lower::Real, upper
         return clamp!((x .- lb) ./ (ub .- lb), 0, 1)
     end
 end
-
-"""
-    crop(x, sz::Int, ul=(1,1))
-    crop(x, sz::Tuple{Int,Int}, ul=(1,1))
-
-Crop a tile equal to `size` out of `x` with an upper-left corner defined by `ul`.
-"""
-crop(x::AbstractArray, sz::Int, ul=(1,1)) = crop(x, (sz, sz), ul)
-function crop(x::AbstractArray, sz::Tuple{Int,Int}, ul=(1,1))
-    # Arg Checks
-    @argcheck length(sz) == length(ul)
-    @argcheck all(1 .<= sz .<= size(x)[1:2])
-    @argcheck all(1 .<= ul .<= size(x)[1:2])
-
-    # Compute Lower-Right Coordinates
-    lr = ul .+ sz .- 1
-
-    # Check Bounds
-    any(lr .> imsize(x)) && throw(ArgumentError("Crop is out of bounds!"))
-
-    # Crop Tile
-    return crop_image(x, ul[1]:lr[1], ul[2]:lr[2])
-end
-
-"""
-    center_crop(x::AbstractArray, sz::Int)
-    center_crop(x::AbstractArray, sz::Tuple{Int,Int})
-
-Crop `x` to the size specified by `sz` from the center.
-"""
-center_crop(x::AbstractArray, sz::Int) = center_crop(x, (sz,sz))
-function center_crop(x::AbstractArray, sz::Tuple{Int,Int})
-    @argcheck all(1 .<= sz .<= imsize(x))
-    pad = imsize(x) .- sz
-    ul = (pad .÷ 2) .+ 1
-    return crop(x, sz, ul)
-end
-
-"""
-    random_crop(seed::Int, x::AbstractArray, sz::Tuple{Int,Int})
-
-Crop a randomly placed tile equal to `sz` from the array `x`.
-"""
-function random_crop(seed::Int, x::AbstractArray, sz::Tuple{Int,Int})
-    @argcheck all(sz .>= 1)
-    lower_bounds = first.(axes(x))[1:2]
-    upper_bounds = last.(axes(x))[1:2] .- sz .+ 1
-    ul = random_point(seed, lower_bounds, upper_bounds)
-    return crop(x, sz, ul)
-end
-
-"""
-    center_zoom(x::AbstractArray, zoom_strength::Int, method::Symbol)
-
-Zoom to the center of `x` by a factor of `zoom_strength`.
-"""
-function center_zoom(x::AbstractArray, zoom_strength::Int, method::Symbol)
-    @argcheck zoom_strength >= 1
-    newsize = imsize(x) .÷ zoom_strength
-    return imresize(center_crop(x, newsize), imsize(x), method)
-end
-
-"""
-    random_zoom(seed::Integer, x::AbstractArray, zoom_strength::Real, method::Symbol)
-
-Zoom to a random location in `x` by a factor of `zoom_strength`.
-"""
-function random_zoom(seed::Integer, x::AbstractArray, zoom_strength::Real, method::Symbol)
-    @argcheck zoom_strength >= 1
-    newsize = round.(Int, imsize(x) .÷ zoom_strength)
-    return imresize(random_crop(seed, x, newsize), imsize(x), method)
-end
-
-"""
-    flipX(x)
-
-Flip the image `x` across the horizontal axis.
-"""
-flipX(x::AbstractArray) = selectdim(x, 2, size(x,2):-1:1)
-
-"""
-    flipY(x)
-
-Flip the image `x` across the vertical axis.
-"""
-flipY(x::AbstractArray) = selectdim(x, 1, size(x,1):-1:1)
-
-"""
-    rot90(x)
-
-Rotate the image `x` by 90 degress. 
-"""
-rot90(x::AbstractArray{<:Any,N}) where N = permutedims(x, (2,1,3:N...)) |> flipX
-
 
 """
     normalize(x::AbstractArray{<:Number,N}, μ::AbstractVector, σ::AbstractVector; channeldim=N)
@@ -207,101 +72,6 @@ function per_image_normalize(x::AbstractArray{<:AbstractFloat,N}; channeldim::In
 
     # Normalize Each Channel
     return (x .- mean(x; dims)) ./ std(x; dims)
-end
-
-"""
-    grayscale(x::AbstractArray, channeldim::Int)
-
-Convert `x` to a grayscale image.
-"""
-function grayscale(x::AbstractArray{<:Real,N}, channeldim::Int) where N
-    repeatdims = ntuple(i -> i == channeldim ? size(x,channeldim) : 1, N)
-    return repeat(mean(x, dims=channeldim), repeatdims...)
-end
-
-"""
-    adjust_contrast(x::AbstractArray, contrast::Real, channeldim::Int)
-
-Adjust the contrast of `x` by `contrast`.
-"""
-function adjust_contrast(x::AbstractArray{T}, contrast::Real) where {T<:Real}
-    @argcheck 0 < contrast
-    return clamp_values!(x .* T(contrast), x)
-end
-
-"""
-    adjust_brightness(x::AbstractArray, brightness::Real)
-
-Adjust the brightness of `x` by `brightness`.
-"""
-function adjust_brightness(x::AbstractArray{T}, brightness::Real) where {T <: Real}
-    return clamp_values!(x .+ T(brightness), x)
-end
-
-"""
-    shift_hue(x::AbstractArray, shift::Real, channeldim::Int)
-
-Shift the hue of `x` in the HSV color space by the amount specified by `shift`.
-"""
-function shift_hue(x::AbstractArray{T,N}, shift::Real, channeldim::Int) where {T<:Real,N}
-    @argcheck size(x, channeldim) == 3
-    @argcheck all(x -> 0 <= x <= 1, x)
-    _shift = T.(reshape([shift, 0, 0], (1,1,3)))
-    return @pipe rgb_to_hsv(x) |> ((_ .+ _shift) .% 360) |> hsv_to_rgb
-end
-
-"""
-    color_jitter(seed::Int, x::AbstractArray, strength::Int, channeldim::Int)
-
-Applies random color jittering transformations (hue, saturation, and brightness) to 
-the input image `x`.
-
-# Parameters
-- `seed`: A seed to make the outcome reproducible.
-- `x`: A tensor containing an RGB image or image series.
-- `strength`: The strength of the jittering, from 1 to 10.
-- `channeldim`: The dimension corresponding to channels in `x`.
-"""
-function color_jitter(seed::Int, x::AbstractArray{T}, strength::Int, channeldim::Int) where {T <: Real}
-    @argcheck 1 <= strength <= 10
-    @argcheck size(x, channeldim) == 3
-    rng = MersenneTwister(seed)
-    hue_shift = LinRange(20,180,10)[strength] * rand(rng, [-1,1])
-    saturation_shift = LinRange(0.05,0.20,10)[strength] * rand(rng, [-1,1])
-    value_shift = LinRange(0.05,0.20,10)[strength] * rand(rng, [-1,1])
-    shift = vec2array([hue_shift, saturation_shift, value_shift], x, channeldim)
-    @pipe rgb_to_hsv(x) |> ((_ .+ shift) .% 360) |> hsv_to_rgb
-end
-
-"""
-    permute_channels(x::AbstractArray, channeldim::Int)
-
-Permute the channel ordering of `x`.
-"""
-function permute_channels(x::AbstractArray, channeldim::Int)
-    return selectdim(x, channeldim, Random.randperm(size(x,channeldim)))
-end
-
-"""
-    invert_color(x::AbstractArray{<:Real})
-
-Invert the colors of `x`.
-"""
-function invert(x::AbstractArray{T}) where {T <: Real}
-    lb, ub = pixel_extrema(x)
-    midpoint = (lb + ub) / 2
-    return T(2 * midpoint) .- x  # (midpoint - x) + midpoint = 2 * midpoint - x
-end
-
-"""
-    solarize(x::AbstractArray{<:Real}; threshold=0.75)
-
-Solarize `x` by inverting all values above `threshold`.
-"""
-function solarize(x::AbstractArray{<:Real}; threshold=0.75)
-    lb, ub = pixel_extrema(x)
-    thresh = ((ub - lb) * threshold) + lb
-    return ifelse.(x .> thresh, invert(x), x)
 end
 
 """
@@ -353,7 +123,7 @@ Add noise generated by the distribution `dist` to the image tensor `x`.
 """
 function add_noise(seed::Integer, dist::Distributions.Distribution, x::AbstractArray{T,N}; channeldim=N, correlated=true) where {T <: Real, N}
     noise_dim = ntuple(i -> ((i == channeldim) && correlated) ? 1 : size(x,i), N)
-    noise = rand(Random.MersenneTwister(seed), dist, noise_dim) .|> T
+    noise = rand(rng_from_seed(seed), dist, noise_dim) .|> T
     return x .+ noise
 end
 
@@ -370,6 +140,6 @@ Multiply noise generated by the distribution `dist` to the image tensor `x`.
 """
 function multiply_noise(seed::Integer, dist::Distributions.Distribution, x::AbstractArray{T,N}; channeldim=N, correlated=true) where {T <: Real, N}
     noise_dim = ntuple(i -> ((i == channeldim) && correlated) ? 1 : size(x,i), N)
-    noise = rand(Random.MersenneTwister(seed), dist, noise_dim) .|> T
+    noise = rand(rng_from_seed(seed), dist, noise_dim) .|> T
     return x .* noise
 end

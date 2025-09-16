@@ -7,17 +7,35 @@ using ArgCheck: @argcheck
 using Pipe: @pipe
 
 include("utils.jl")
+
 include("types.jl")
-export DType, AbstractImage, AbstractMask, Image2D, Image3D, Mask2D, Mask3D, Series2D, NoOp
+export Item, AbstractRaster, AbstractImage, AbstractMask, Image, Mask, NoOp
+
+include("methods/affine.jl")
+export CropFrom, FromCenter, FromOrigin, FromRandom
+export sample_tile, crop, zoom, imresize, flip, rot90
+
+include("methods/color.jl")
+export grayscale, adjust_brightness, adjust_contrast, color_jitter, permute_channels, invert_color, solarize
+
+include("methods/batched.jl")
+export MixUp
 
 include("methods.jl")
-export image2tensor, tensor2image, imresize, linear_stretch, per_image_linear_stretch, normalize, per_image_normalize
-export crop, center_crop, random_crop, flipX, flipY, rot90, color_jitter, invert, solarize, add_noise, multiply_noise
-export center_zoom, random_zoom, grayscale, adjust_brightness, adjust_contrast, adjust_hue, blur, sharpen
 
-include("transforms.jl")
+include("transforms/transforms.jl")
 export AbstractTransform, transform, apply
+
+include("transforms/affine.jl")
+export Resize, Crop, CenterCrop, RandomCrop, OriginCrop, Zoom, CenterCrop, RandomZoom
+export Flip, FlipX, FlipY, FlipZ, Rot90
+
+
+include("transforms/color.jl")
+include("transforms/composite.jl")
 export Resize, Scale, PerImageScale, Normalize, PerImageNormalize, RandomCrop, FlipX, FlipY, Rot90, ComposedTransform
 export ColorJitter, TrivialAugment
+
+#include("recipe.jl")
 
 end
