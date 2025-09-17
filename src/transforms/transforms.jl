@@ -6,19 +6,11 @@ apply(::AbstractTransform, x::Any, ::Int) = x
 
 outsize(::AbstractTransform, insize::Tuple) = insize
 
-"""
-    transform(t::AbstractTransform, item, x)
-    transform(t::AbstractTransform, items::Tuple, x::Tuple)
-
-Apply the transformation `t` to the input `x` with data type `item`.
-"""
-transform(t::AbstractTransform, ::Type{T}, x) where {T <: Item} = apply(t, T(x), rand(1:10000)) |> parent
-function transform(t::AbstractTransform, items::Tuple, x::Tuple)
-    @argcheck length(items) == length(x)
-    seed = rand(1:10000)
-    ntuple(length(items)) do i
-        apply(t, items[i](x[i]), seed) |> parent
-    end
+(t::AbstractTransform)(x::Item, seed=rand(1:10000)) = apply(t, x, seed)
+(t::AbstractTransform)(x::Pair{<:Type,<:Any}, seed=rand(1:10000)) = apply(t, x[1](x[2]), seed) |> parent
+(t::AbstractTransform)(x::Pair{<:Tuple,<:Tuple}, seed=rand(1:10000)) = t(x[1] .=> x[2], seed)
+function (t::AbstractTransform)(xs::Tuple, seed=rand(1:10000))
+    return map(x -> t(x, seed), xs)
 end
 
 """

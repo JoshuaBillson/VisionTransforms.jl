@@ -24,10 +24,10 @@ export MixUp
 include("methods.jl")
 
 include("transforms/transforms.jl")
-export AbstractTransform, transform, apply
+export AbstractTransform, apply
 
 include("transforms/affine.jl")
-export Resize, Crop, CenterCrop, RandomCrop, OriginCrop, Zoom, CenterCrop, RandomZoom
+export Resize, Crop, CenterCrop, RandomCrop, OriginCrop, Zoom, CenterZoom, RandomZoom
 export Flip, FlipX, FlipY, FlipZ, Rot90
 
 
