@@ -13,6 +13,7 @@ function Grayscale(;p=1.0)
 end
 
 function apply(t::Grayscale, x::AbstractImage, seed::Int)
+    @debug "Grayscale"
     return roll_dice(rng_from_seed(seed), t.p) ? grayscale(x) : x
 end
 
@@ -34,6 +35,7 @@ function ColorJitter(;strength=5)
 end
 
 function apply(t::ColorJitter, x::AbstractImage, seed::Int)
+    @debug "Color Jitter"
     return color_jitter(rng_from_seed(seed), x, t.strength)
 end
 
@@ -54,6 +56,7 @@ function InvertColor(;p=1.0)
 end
 
 function apply(t::InvertColor, x::AbstractImage, seed::Int) 
+    @debug "Invert Color"
     rng = rng_from_seed(seed)
     return roll_dice(rng, t.p) ? invert_color(x) : x
 end
@@ -76,6 +79,27 @@ function Solarize(;p=1.0, threshold=0.75)
     return Solarize(p, threshold)
 end
 
-apply(t::Solarize, x::AbstractImage, seed::Int) = apply_random(x -> solarize(x; t.threshold), seed, t.p, x)
+function apply(t::Solarize, x::AbstractImage, seed::Int)
+    @debug "Solarize"
+    rng = rng_from_seed(seed)
+    return roll_dice(rng, t.p) ? solarize(x; t.threshold) : x
+end
 
 description(x::Solarize) = "Solarize colors with probability $(x.p)."
+
+struct PermuteChannels <: AbstractTransform
+    p::Float64
+end
+
+function PermuteChannels(;p=1.0)
+    @argcheck 0 <= p <= 1
+    return PermuteChannels(p)
+end
+
+function apply(t::PermuteChannels, x::AbstractImage, seed::Int)
+    @debug "Permute Channels"
+    rng = rng_from_seed(seed)
+    return roll_dice(rng, t.p) ? permute_channels(rng, x) : x
+end
+
+description(t::PermuteChannels) = "Randomly permute channels with probability $(t.p)."

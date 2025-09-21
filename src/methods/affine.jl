@@ -6,21 +6,23 @@ struct FromOrigin <: CropFrom end
 
 struct FromRandom <: CropFrom end
 
-function sample_tile(::FromCenter, imgsize::NTuple{N,Int}, tilesize::NTuple{N,Int}, ::Int) where N
+sample_tile(c::FromCenter, args...) = sample_tile(Random.default_rng(), c, args...)
+function sample_tile(::Random.AbstractRNG, ::FromCenter, imgsize::NTuple{N,Int}, tilesize::NTuple{N,Int}) where N
     return ((imgsize .- tilesize) .÷ 2) .+ 1
 end
 
-function sample_tile(::FromOrigin, imgsize::NTuple{N,Int}, tilesize::NTuple{N,Int}, ::Int) where N
+sample_tile(c::FromOrigin, args...) = sample_tile(Random.default_rng(), c, args...)
+function sample_tile(::Random.AbstractRNG, ::FromOrigin, imgsize::NTuple{N,Int}, tilesize::NTuple{N,Int}) where N
     return ntuple(_ -> 1, N)
 end
 
-function sample_tile(::FromRandom, imgsize::NTuple{N,Int}, tilesize::NTuple{N,Int}, seed::Int) where N
+sample_tile(c::FromRandom, args...) = sample_tile(Random.default_rng(), c, args...)
+function sample_tile(rng::Random.AbstractRNG, ::FromRandom, imgsize::NTuple{N,Int}, tilesize::NTuple{N,Int}) where N
     # Get Upper and Lower Bounds
     lower_bounds = ntuple(_ -> 1, N)
     upper_bounds = imgsize .- tilesize .+ 1
 
     # Sample Random Point From Bounds
-    rng = rng_from_seed(seed)
     map((1:N...,)) do i
         outcome = rand(rng, Random.uniform(Float64))
         displacement = round(Int, outcome * (upper_bounds[i] - lower_bounds[i]))
@@ -29,12 +31,13 @@ function sample_tile(::FromRandom, imgsize::NTuple{N,Int}, tilesize::NTuple{N,In
 end
 
 """
-    crop(from::CropFrom, sz::NTuple{N1,Int}, x::AbstractArray{<:Any,N2}, seed::Int)
+    crop([rng], from::CropFrom, sz::NTuple{N1,Int}, x::AbstractArray{<:Any,N2})
 
 Crop `x` to `sz` with the upper-left corner specified by `from`.
 """
-function crop(from::CropFrom, sz::NTuple{N1,Int}, x::AbstractArray{<:Any,N2}, seed::Int) where {N1,N2}
-    ul = sample_tile(from, imsize(x), sz, seed)
+crop(from::CropFrom, sz::NTuple, x::AbstractArray) = crop(Random.default_rng(), from, sz, x)
+function crop(rng::Random.AbstractRNG, from::CropFrom, sz::NTuple{N1,Int}, x::AbstractArray{<:Any,N2}) where {N1,N2}
+    ul = sample_tile(rng, from, imsize(x), sz)
     return _crop(x, sz, ul)
 end
 
@@ -77,10 +80,11 @@ function _imresize(img::AbstractArray, sz::Tuple, method::Symbol)
     end
 end
 
-function zoom(from::CropFrom, zoom_strength::Real, method::Symbol, x::AbstractArray, seed::Int)
+zoom(from::CropFrom, zoom_strength::Real, method::Symbol, x::AbstractArray) = zoom(Random.default_rng(), from, zoom_strength, method, x)
+function zoom(rng::Random.AbstractRNG, from::CropFrom, zoom_strength::Real, method::Symbol, x::AbstractArray)
     @argcheck zoom_strength >= 1
-    newsize = imsize(x) .÷ zoom_strength
-    cropped = crop(from, newsize, x, seed)
+    newsize = Int.(imsize(x) .÷ zoom_strength)
+    cropped = crop(rng, from, newsize, x)
     return imresize(cropped, imsize(x), method)
 end
 

@@ -40,7 +40,7 @@ description(t::Crop{FromRandom}) = "Random crop to size $(t.sz)."
 
 function apply(t::Crop, x::AbstractRaster, seed::Int)
     sz = _crop_size(imsize(x), t.sz)  # Adjust crop dimensions to match image dimensions
-    return crop(t.from, sz, x, seed)
+    return crop(rng_from_seed(seed), t.from, sz, x)
 end
 
 _crop_size(imsize::NTuple{N,Int}, cropsize::NTuple{N,Int}) where N = cropsize
@@ -95,13 +95,13 @@ description(t::Zoom{FromRandom}) = "Random zoom by a factor sampled from $(t.str
 function apply(t::Zoom, x::AbstractImage, seed::Int)
     rng = rng_from_seed(seed)
     zoom_strength = rand(rng, t.strength)
-    return zoom(t.from, zoom_strength, :bilinear, x, seed)
+    return zoom(rng, t.from, zoom_strength, :bilinear, x)
 end
 
 function apply(t::Zoom, x::AbstractMask, seed::Int)
     rng = rng_from_seed(seed)
     zoom_strength = rand(rng, t.strength)
-    return zoom(t.from, zoom_strength, :nearest, x, seed)
+    return zoom(rng, t.from, zoom_strength, :nearest, x)
 end
 
 """

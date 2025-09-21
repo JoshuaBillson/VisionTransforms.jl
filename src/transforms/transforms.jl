@@ -94,8 +94,6 @@ apply(::PerImageNormalize, x::AbstractImage, ::Int) = per_image_normalize(x; cha
 
 description(x::PerImageNormalize) = "Normalize with per-image statistics."
 
-# ColorJitter
-
 struct ApplyRandom{T<:AbstractTransform} <: AbstractTransform
     p::Float64
     transform::T
@@ -115,6 +113,8 @@ end
 
 struct OneOf{T} <: AbstractTransform
     transforms::T
+    OneOf(transforms...) = OneOf(transforms)
+    OneOf(transforms::T) where {T<:Tuple} = new{T}(transforms)
 end
 
 description(t::OneOf) = join(t.transforms, " or ") * "."

@@ -30,11 +30,11 @@ include("transforms/affine.jl")
 export Resize, Crop, CenterCrop, RandomCrop, OriginCrop, Zoom, CenterZoom, RandomZoom
 export Flip, FlipX, FlipY, FlipZ, Rot90
 
-
 include("transforms/color.jl")
+export ColorJitter, InvertColor, Grayscale, Solarize, PermuteChannels
+
 include("transforms/composite.jl")
-export Resize, Scale, PerImageScale, Normalize, PerImageNormalize, RandomCrop, FlipX, FlipY, Rot90, ComposedTransform
-export ColorJitter, TrivialAugment
+export Scale, PerImageScale, Normalize, PerImageNormalize, ComposedTransform, TrivialAugment, OneOf
 
 #include("recipe.jl")
 
