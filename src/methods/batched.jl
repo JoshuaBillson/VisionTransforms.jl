@@ -6,14 +6,25 @@ function MixUp(rng, images::AbstractArray{T,4}, labels::AbstractArray{<:Real,2};
     # Get Paired Images and Labels
     nobs = size(images,4)
     pairs = Random.randperm(rng, nobs)
-    images2 = @view images[:,:,:,pairs]
-    labels2 = @view labels[:,pairs]
 
     # Get Mixing Values
     lambdas = T.(Random.rand(rng, Distributions.Beta(alpha), nobs))
 
     # Mix Images and Labels
-    mixed_images = (reshape(lambdas, (1,1,1,:)) .* images) .+ (reshape(T(1) .- lambdas, (1,1,1,:)) .* images2)
-    mixed_labels = (reshape(lambdas, (1,:)) .* labels) .+ (reshape(T(1) .- lambdas, (1,:)) .* labels2)
+    return _mixup(images, labels, pairs, lambdas)
+end
+
+function _mixup(images::AbstractArray{T,4}, labels::AbstractArray{T,2}, pairs::AbstractVector{<:Integer}, lambdas::AbstractVector{T}) where {T<:Real}
+    # Make pairs and lambdas match type of image and label arrays
+    _pairs = similar(images, Int, size(pairs))
+    _pairs .= pairs
+    _lambdas = similar(images, T, (1,1,1,length(lambdas)))
+    _lambdas[1,1,1,:] .= lambdas
+
+    # Mix Images and Labels
+    images2 = @view images[:,:,:,_pairs]
+    labels2 = @view labels[:,_pairs]
+    mixed_images = (_lambdas .* images) .+ ((T(1) .- _lambdas) .* images2)
+    mixed_labels = (dropdims(_lambdas; dims=(1,2)) .* labels) .+ ((T(1) .- dropdims(_lambdas; dims=(1,2))) .* labels2)
     return mixed_images, mixed_labels
 end
